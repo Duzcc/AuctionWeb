@@ -1,6 +1,6 @@
 .room-lobby {
     min-height: 100vh;
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
     background-size: 200% 200%;
     animation: gradientShift 20s ease infinite;
     color: white;
@@ -31,7 +31,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: url('data:image/svg+xml,<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse"><path d="M 100 0 L 0 0 0 100" fill="none" stroke="rgba(212,175,55,0.03)" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="url(%23grid)" /></svg>');
+    background: url('data:image/svg+xml,<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="grid" width="100" height="100" patternUnits="userSpaceOnUse"><path d="M 100 0 L 0 0 0 100" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="url(%23grid)" /></svg>');
     pointer-events: none;
     z-index: 0;
 }
@@ -46,11 +46,11 @@
 .spinner-large {
     width: 80px;
     height: 80px;
-    border: 6px solid rgba(212, 175, 55, 0.2);
+    border: 6px solid rgba(102, 126, 234, 0.2);
     border-top: 6px solid transparent;
     border-right: 6px solid transparent;
     border-radius: 50%;
-    background: linear-gradient(135deg, #D4AF37 0%, #f59e0b 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     animation: spin 1s linear infinite;
 }
 
@@ -80,7 +80,7 @@
 .btn-back {
     margin-top: 24px;
     padding: 14px 32px;
-    background: linear-gradient(135deg, #D4AF37 0%, #AA8C3C 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: #fff;
     border: none;
     border-radius: 12px;
@@ -88,12 +88,12 @@
     font-weight: 700;
     cursor: pointer;
     transition: all 0.3s ease;
-    box-shadow: 0 4px 20px rgba(212, 175, 55, 0.4);
+    box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
 }
 
 .btn-back:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 30px rgba(212, 175, 55, 0.6);
+    box-shadow: 0 8px 30px rgba(102, 126, 234, 0.6);
 }
 
 /* Container */
@@ -124,10 +124,10 @@
 }
 
 .btn-back-small {
-    background: rgba(212, 175, 55, 0.1);
+    background: rgba(102, 126, 234, 0.1);
     backdrop-filter: blur(10px);
-    border: 2px solid rgba(212, 175, 55, 0.3);
-    color: #D4AF37;
+    border: 2px solid rgba(102, 126, 234, 0.3);
+    color: #667eea;
     padding: 10px 20px;
     border-radius: 12px;
     font-size: 14px;
@@ -141,21 +141,21 @@
 }
 
 .btn-back-small:hover {
-    background: rgba(212, 175, 55, 0.2);
-    border-color: #D4AF37;
+    background: rgba(102, 126, 234, 0.2);
+    border-color: #667eea;
     transform: translateX(-4px);
 }
 
 .lobby-title {
     font-size: 56px;
     font-weight: 900;
-    background: linear-gradient(135deg, #D4AF37 0%, #f59e0b 50%, #fbbf24 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin-bottom: 12px;
     letter-spacing: -1px;
-    text-shadow: 0 0 60px rgba(212, 175, 55, 0.3);
+    text-shadow: 0 0 60px rgba(102, 126, 234, 0.3);
     animation: shimmer 3s ease-in-out infinite;
     background-size: 200% auto;
 }
@@ -174,7 +174,7 @@
 
 .lobby-subtitle {
     font-size: 18px;
-    color: #D4AF37;
+    color: rgba(255, 255, 255, 0.9);
     text-transform: uppercase;
     letter-spacing: 3px;
     font-weight: 700;
@@ -210,13 +210,13 @@
 
 /* Cards */
 .section-card {
-    background: rgba(31, 41, 55, 0.6);
+    background: rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(20px);
-    border: 1px solid rgba(212, 175, 55, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 24px;
     overflow: hidden;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4),
-        0 0 0 1px rgba(212, 175, 55, 0.1) inset;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3),
+        0 0 0 1px rgba(255, 255, 255, 0.1) inset;
     transition: all 0.4s ease;
     position: relative;
 }
@@ -230,7 +230,7 @@
     height: 200%;
     background: linear-gradient(45deg,
             transparent,
-            rgba(212, 175, 55, 0.05),
+            rgba(255, 255, 255, 0.05),
             transparent);
     transform: rotate(45deg);
     animation: cardShine 4s linear infinite;
@@ -248,9 +248,9 @@
 
 .section-card:hover {
     transform: translateY(-4px);
-    border-color: rgba(212, 175, 55, 0.4);
-    box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(212, 175, 55, 0.3) inset;
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 16px 50px rgba(0, 0, 0, 0.4),
+        0 0 0 1px rgba(255, 255, 255, 0.2) inset;
 }
 
 .card-header {
@@ -258,9 +258,9 @@
     align-items: center;
     gap: 14px;
     padding: 24px 28px;
-    background: linear-gradient(135deg, rgba(212, 175, 55, 0.15) 0%, rgba(212, 175, 55, 0.05) 100%);
-    border-bottom: 1px solid rgba(212, 175, 55, 0.2);
-    color: #D4AF37;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.05) 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
     position: relative;
     z-index: 1;
 }
@@ -294,27 +294,27 @@
 
 .info-row:hover {
     padding-left: 8px;
-    background: rgba(212, 175, 55, 0.05);
+    background: rgba(102, 126, 234, 0.1);
     border-radius: 8px;
 }
 
 .info-label {
-    color: #9ca3af;
+    color: rgba(255, 255, 255, 0.7);
     font-size: 15px;
     font-weight: 600;
 }
 
 .info-value {
-    color: #e5e7eb;
+    color: #fff;
     font-weight: 700;
     font-size: 16px;
 }
 
 .info-value.highlight {
-    color: #D4AF37;
+    color: #667eea;
     font-size: 20px;
     font-weight: 800;
-    text-shadow: 0 0 20px rgba(212, 175, 55, 0.4);
+    text-shadow: 0 0 20px rgba(102, 126, 234, 0.4);
 }
 
 /* Status Badges */
@@ -357,10 +357,10 @@
 
 /* Countdown Card */
 .countdown-card {
-    background: linear-gradient(135deg, rgba(212, 175, 55, 0.15) 0%, rgba(170, 140, 60, 0.08) 100%);
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.15) 100%);
     backdrop-filter: blur(20px);
-    border: 2px solid rgba(212, 175, 55, 0.3);
-    box-shadow: 0 0 40px rgba(212, 175, 55, 0.2);
+    border: 2px solid rgba(102, 126, 234, 0.3);
+    box-shadow: 0 0 40px rgba(102, 126, 234, 0.2);
 }
 
 .countdown-display {
@@ -373,14 +373,14 @@
 .countdown-time {
     font-size: 64px;
     font-weight: 900;
-    background: linear-gradient(135deg, #D4AF37 0%, #f59e0b 50%, #fbbf24 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin-bottom: 20px;
     font-family: 'Courier New', monospace;
     letter-spacing: 2px;
-    text-shadow: 0 0 60px rgba(212, 175, 55, 0.5);
+    text-shadow: 0 0 60px rgba(102, 126, 234, 0.5);
     animation: countdownPulse 2s ease-in-out infinite;
 }
 
@@ -436,9 +436,9 @@
 }
 
 .plate-preview {
-    background: rgba(31, 41, 55, 0.7);
+    background: rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(10px);
-    border: 2px solid rgba(212, 175, 55, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.2);
     border-radius: 16px;
     padding: 24px 20px;
     text-align: center;
@@ -454,7 +454,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: linear-gradient(135deg, transparent 0%, rgba(212, 175, 55, 0.1) 100%);
+    background: linear-gradient(135deg, transparent 0%, rgba(255, 255, 255, 0.1) 100%);
     opacity: 0;
     transition: opacity 0.4s ease;
 }
@@ -464,26 +464,26 @@
 }
 
 .plate-preview:hover {
-    border-color: #D4AF37;
+    border-color: rgba(255, 255, 255, 0.4);
     transform: translateY(-8px) scale(1.02);
-    box-shadow: 0 16px 40px rgba(212, 175, 55, 0.3);
+    box-shadow: 0 16px 40px rgba(102, 126, 234, 0.3);
 }
 
 .plate-preview.more {
-    background: linear-gradient(135deg, rgba(212, 175, 55, 0.2) 0%, rgba(212, 175, 55, 0.1) 100%);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.1) 100%);
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 2px dashed rgba(212, 175, 55, 0.5);
+    border: 2px dashed rgba(255, 255, 255, 0.3);
 }
 
 .plate-number {
     font-size: 36px;
     font-weight: 900;
     font-family: 'Courier New', monospace;
-    color: #D4AF37;
+    color: #fff;
     margin-bottom: 12px;
-    text-shadow: 0 0 20px rgba(212, 175, 55, 0.4);
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.4);
     letter-spacing: 2px;
 }
 
@@ -495,7 +495,7 @@
 
 .more-text {
     font-size: 20px;
-    color: #D4AF37;
+    color: #667eea;
     font-weight: 700;
 }
 
@@ -522,7 +522,7 @@
 }
 
 .rule-item:hover {
-    background: rgba(212, 175, 55, 0.05);
+    background: rgba(102, 126, 234, 0.1);
     transform: translateX(4px);
 }
 
@@ -541,10 +541,10 @@
 }
 
 .btn-join-room {
-    background: linear-gradient(135deg, #D4AF37 0%, #AA8C3C 50%, #D4AF37 100%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #667eea 100%);
     background-size: 200% auto;
     border: none;
-    color: #0f172a;
+    color: #fff;
     font-size: 22px;
     font-weight: 900;
     padding: 24px 64px;
@@ -554,8 +554,8 @@
     align-items: center;
     gap: 14px;
     transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    box-shadow: 0 12px 40px rgba(212, 175, 55, 0.5),
-        0 0 0 4px rgba(212, 175, 55, 0.2);
+    box-shadow: 0 12px 40px rgba(102, 126, 234, 0.5),
+        0 0 0 4px rgba(102, 126, 234, 0.2);
     text-transform: uppercase;
     letter-spacing: 1.5px;
     position: relative;
@@ -579,8 +579,8 @@
 
 .btn-join-room:hover:not(:disabled) {
     transform: translateY(-4px) scale(1.05);
-    box-shadow: 0 20px 60px rgba(212, 175, 55, 0.7),
-        0 0 0 6px rgba(212, 175, 55, 0.3);
+    box-shadow: 0 20px 60px rgba(102, 126, 234, 0.7),
+        0 0 0 6px rgba(102, 126, 234, 0.3);
     background-position: right center;
 }
 
@@ -598,7 +598,7 @@
 
 .join-hint {
     margin-top: 20px;
-    color: #D4AF37;
+    color: #667eea;
     font-size: 15px;
     font-weight: 600;
     opacity: 0.8;
