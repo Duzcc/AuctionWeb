@@ -67,58 +67,16 @@ export const createRegistration = async (req, res, next) => {
             } else {
                 console.log('🆕 Creating NEW session for plate:', plate.plateNumber);
 
-                // 2. Create New Session
-                // A. Find/Create Room
-                let room = await Room.findOne({ roomName: 'Public Auction Room' });
-                if (!room) {
-                    room = await Room.create({
-                        roomName: 'Public Auction Room',
-                        location: 'Online',
-                        capacity: 1000,
-                        description: 'Default room for auto-created sessions',
-                        isActive: true
-                    });
-                }
+                // Use sessionService to create session
+                const { autoCreateSessionForPlate } = await import('../services/sessionService.js');
 
-                // B. Calculate Times (Default: 7 days from now)
-                const now = new Date();
-                const startTime = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // +7 days
-                const endTime = new Date(startTime.getTime() + 30 * 60 * 1000);      // +30 mins duration
-
-                // Registration open now, close 1 hour before start
-                const regStart = now;
-                const regEnd = new Date(startTime.getTime() - 60 * 60 * 1000);
-
-                const newSession = await Session.create({
-                    sessionName: `Auction for ${plate.plateNumber}`,
-                    roomId: room._id,
-                    startTime,
-                    endTime,
-                    registrationStart: regStart,
-                    registrationEnd: regEnd,
-                    status: 'registration_open',
-                    depositAmount: 40000000, // Default 40M
-                    description: `Auto-generated auction session for ${plate.plateNumber}`
+                const result = await autoCreateSessionForPlate(plate._id, itemType, {
+                    daysUntilStart: 7,      // 7 days from now
+                    durationMinutes: 30,    // 30 minutes
+                    depositAmount: 40000000 // 40M VND
                 });
 
-                // C. Create SessionPlate
-                await SessionPlate.create({
-                    sessionId: newSession._id,
-                    plateId: plate._id,
-                    itemType: itemType, // 'CarPlate' or 'MotorbikePlate'
-                    plateNumber: plate.plateNumber,
-                    orderNumber: 1,
-                    startingPrice: plate.startingPrice,
-                    currentPrice: plate.startingPrice,
-                    priceStep: 1000000, // 1M step default? Or derived? Assuming 1M usually
-                    status: 'pending'
-                });
-
-                // Update Plate status to 'in_auction' IF you want to lock it? 
-                // Usually good practice:
-                // await CarPlate.findByIdAndUpdate(plate._id, { status: 'in_auction' });
-
-                targetSessionId = newSession._id;
+                targetSessionId = result.session._id;
             }
         }
         // --- END AUTO-CREATE ---
@@ -173,8 +131,13 @@ export const createRegistration = async (req, res, next) => {
             status: 'registered'
         });
 
-        // 4. Create Registration
+        // 4. Create Registration with plate information
         const actualDeposit = depositAmount || session.depositAmount || 40000000;
+
+        // Extract plate info from request (if provided)
+        const plateId = req.body.plateId;
+        const plateNumber = req.body.plateNumber;
+        const plateType = req.body.itemType || req.body.plateType;
 
         const registration = await Registration.create({
             sessionId: targetSessionId,
@@ -183,6 +146,9 @@ export const createRegistration = async (req, res, next) => {
             depositAmount: actualDeposit,
             depositStatus: 'pending',
             status: 'registered',
+            plateId: plateId || undefined,
+            plateNumber: plateNumber || undefined,
+            plateType: plateType || undefined,
             notes
         });
 

@@ -12,9 +12,16 @@ let io;
  * @param {Object} httpServer - HTTP server instance
  */
 export const initializeSocket = (httpServer) => {
+    // Support multiple frontend instances
+    const allowedOrigins = [
+        'http://localhost:5173',
+        'http://localhost:5174',
+        process.env.FRONTEND_URL
+    ].filter(Boolean);
+
     io = new Server(httpServer, {
         cors: {
-            origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+            origin: allowedOrigins,
             methods: ['GET', 'POST'],
             credentials: true,
         },
@@ -62,42 +69,48 @@ export const initializeSocket = (httpServer) => {
                 console.log('📥 join_auction request:', data);
                 console.log('User from socket:', socket.user);
 
-                // Support both sessionId and sessionPlateId
-                const requestedSessionId = data.sessionId || data.sessionPlateId; // Renamed to avoid conflict with session.sessionId
+                const { sessionPlateId } = data;
 
-                if (!requestedSessionId) {
-                    console.error('❌ Missing sessionId/sessionPlateId in join_auction data');
-                    return socket.emit('error', { message: 'Session ID is required' });
+                if (!sessionPlateId) {
+                    console.error('❌ Missing sessionPlateId in join_auction data');
+                    return socket.emit('error', { message: 'SessionPlate ID is required' });
                 }
 
-                // Find the session
-                const session = await Session.findById(requestedSessionId);
-                if (!session) {
-                    console.error('❌ Session not found:', requestedSessionId);
-                    console.error('Available sessions count:', await Session.countDocuments());
+                // Find the SessionPlate
+                const sessionPlate = await SessionPlate.findById(sessionPlateId);
+                if (!sessionPlate) {
+                    console.error('❌ SessionPlate not found:', sessionPlateId);
                     return socket.emit('error', { message: 'Auction not found' });
                 }
 
-                console.log('✅ Session found:', session.sessionName);
+                console.log('✅ SessionPlate found:', sessionPlate.plateNumber);
 
-                // Check access: Must have APPROVED registration
+                // Get the parent Session
+                const session = await Session.findById(sessionPlate.sessionId);
+                if (!session) {
+                    console.error('❌ Parent session not found for SessionPlate:', sessionPlateId);
+                    return socket.emit('error', { message: 'Session not found' });
+                }
+
+                console.log('✅ Parent session found:', session.sessionName);
+
+                // Check access: Must have APPROVED registration for this SESSION
                 const registration = await Registration.findOne({
                     userId: userId,
-                    sessionId: session._id, // Use the found session's ID
+                    sessionId: session._id,
                     status: 'approved',
                     depositStatus: 'paid'
                 });
-                console.log('✅ Registration found:', registration);
-                console.log('User is allowed to join auction.');
-                console.log('User ID:', userId);
-                console.log('Session ID:', session._id);
 
                 if (!registration) {
+                    console.log('❌ No approved registration found for user:', userId);
                     socket.emit('error', {
                         message: 'You must be registered and approved to join this auction'
                     });
                     return;
                 }
+
+                console.log('✅ Registration verified for user:', username);
 
                 // Join auction room
                 const roomName = `auction:${sessionPlateId}`;
@@ -106,7 +119,9 @@ export const initializeSocket = (httpServer) => {
 
                 // Get current state
                 const now = new Date();
-                const timeLeft = Math.max(0, sessionPlate.auctionEndTime - now);
+                const timeLeft = sessionPlate.auctionEndTime
+                    ? Math.max(0, new Date(sessionPlate.auctionEndTime) - now)
+                    : 0;
                 const viewers = io.sockets.adapter.rooms.get(roomName)?.size || 1;
 
                 // Get recent bids
@@ -115,7 +130,7 @@ export const initializeSocket = (httpServer) => {
                     .limit(10)
                     .populate('userId', 'username avatar');
 
-                console.log(`User ${username} joined auction room: ${sessionPlateId}`);
+                console.log(`✅ User ${username} joined auction room: ${sessionPlateId}`);
 
                 socket.emit('auction_joined', {
                     message: 'Joined auction room successfully',

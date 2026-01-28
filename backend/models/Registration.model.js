@@ -38,6 +38,19 @@ const registrationSchema = new mongoose.Schema(
         depositProofUploadedAt: {
             type: Date,
         },
+        // Plate Information - Track which plate this registration is for
+        plateNumber: {
+            type: String,
+            trim: true,
+        },
+        plateType: {
+            type: String,
+            enum: ['CarPlate', 'MotorbikePlate', 'Asset'],
+        },
+        plateId: {
+            type: mongoose.Schema.Types.ObjectId,
+            refPath: 'plateType', // Dynamic reference based on plateType
+        },
         notes: {
             type: String,
             trim: true,
@@ -53,6 +66,8 @@ registrationSchema.index({ sessionId: 1 });
 registrationSchema.index({ userId: 1 });
 registrationSchema.index({ status: 1 });
 registrationSchema.index({ depositStatus: 1 });
+registrationSchema.index({ plateNumber: 1 });
+registrationSchema.index({ plateId: 1 });
 
 // Compound unique index to prevent duplicate registrations
 registrationSchema.index({ sessionId: 1, userId: 1 }, { unique: true });

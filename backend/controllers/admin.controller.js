@@ -1,6 +1,7 @@
 import User from '../models/User.model.js';
 import Payment from '../models/Payment.model.js';
 import Session from '../models/Session.model.js';
+import SessionPlate from '../models/SessionPlate.model.js';
 import Registration from '../models/Registration.model.js';
 import CarPlate from '../models/CarPlate.model.js';
 import MotorbikePlate from '../models/MotorbikePlate.model.js';
@@ -97,18 +98,86 @@ export const approvePayment = async (req, res, next) => {
         payment.approvedAt = new Date();
         await payment.save();
 
+        let sessionCreationResult = null;
+
         // Update registration status if linked
         if (payment.registration) {
-            await Registration.findByIdAndUpdate(payment.registration, {
-                depositStatus: 'paid',
-                status: 'approved'
-            });
+            const registration = await Registration.findByIdAndUpdate(
+                payment.registration,
+                {
+                    depositStatus: 'paid',
+                    status: 'approved'
+                },
+                { new: true }
+            );
+
+            // Auto-create session if registration has plate information
+            if (registration && registration.plateId && registration.plateType) {
+                try {
+                    const { autoCreateSessionForPlate } = await import('../services/sessionService.js');
+
+                    console.log(`🎯 Auto-creating session for plate: ${registration.plateNumber}`);
+
+                    const result = await autoCreateSessionForPlate(
+                        registration.plateId,
+                        registration.plateType,
+                        {
+                            daysUntilStart: 3,      // Auction starts in 3 days
+                            durationMinutes: 60,     // 1 hour auction
+                            depositAmount: registration.depositAmount
+                        }
+                    );
+
+                    sessionCreationResult = {
+                        sessionId: result.session._id,
+                        sessionName: result.session.sessionName,
+                        startTime: result.session.startTime,
+                        endTime: result.session.endTime,
+                        isNew: result.isNew,
+                        message: result.message
+                    };
+
+                    if (result.isNew) {
+                        console.log(`✅ Created new session: ${result.session.sessionName}`);
+                    } else {
+                        console.log(`ℹ️  Using existing session: ${result.session.sessionName}`);
+                    }
+
+                    // Update registration with sessionId if newly created
+                    if (result.isNew && registration.sessionId?.toString() !== result.session._id.toString()) {
+                        await Registration.findByIdAndUpdate(registration._id, {
+                            sessionId: result.session._id
+                        });
+                    }
+
+                } catch (sessionError) {
+                    console.error('❌ Error creating session:', sessionError.message);
+                    // Don't fail the payment approval if session creation fails
+                    sessionCreationResult = {
+                        error: true,
+                        message: `Session creation failed: ${sessionError.message}`
+                    };
+                }
+            }
+        }
+
+        // Build response message
+        let responseMessage = 'Payment approved successfully';
+        if (sessionCreationResult) {
+            if (sessionCreationResult.error) {
+                responseMessage += '. Note: ' + sessionCreationResult.message;
+            } else if (sessionCreationResult.isNew) {
+                responseMessage += ` and auction session created: ${sessionCreationResult.sessionName}`;
+            } else {
+                responseMessage += ` and linked to existing session: ${sessionCreationResult.sessionName}`;
+            }
         }
 
         res.status(200).json({
             success: true,
-            message: 'Payment approved successfully',
-            data: payment
+            message: responseMessage,
+            data: payment,
+            sessionCreated: sessionCreationResult
         });
     } catch (error) {
         next(error);
