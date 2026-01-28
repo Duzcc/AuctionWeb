@@ -133,6 +133,8 @@ export async function seedSessions(rooms, { cars = [], motorbikes = [], assets =
                         itemType: itemType, // 'CarPlate', 'MotorbikePlate', 'Asset'
                         plateNumber: item.plateNumber || item.name, // Use name for assets
                         orderNumber: i + 1,
+                        startingPrice: item.startingPrice, // Required field
+                        priceStep: item.priceStep || 1000000, // Required field, default 1M VND
                         currentPrice,
                         finalPrice,
                         status
