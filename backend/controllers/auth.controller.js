@@ -129,7 +129,7 @@ export const loginUser = async (req, res) => {
         const isAdmin = user.role === 'admin' || user.email === process.env.EMAIL_USER; // OR process.env.ADMIN_EMAIL if used
 
         // If Admin, Enforce OTP
-        if (isAdmin) {
+        if (isAdmin) { // Bỏ TEST BYPASS
             // Case A: OTP Submitted -> Verify and Login
             if (otpCode) {
                 if (!user.verifyOTP(otpCode)) {
@@ -145,7 +145,10 @@ export const loginUser = async (req, res) => {
             else {
                 const newOtp = user.generateOTP();
                 await user.save();
-                await sendOTPEmail(user.email, newOtp);
+                
+                // Send to valid admin email in .env instead of fake seed email
+                const emailToReceiveOTP = isAdmin ? (process.env.ADMIN_NOTIFICATION_EMAIL || user.email) : user.email;
+                await sendOTPEmail(emailToReceiveOTP, newOtp);
 
                 return res.status(200).json({
                     success: true,

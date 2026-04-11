@@ -5,7 +5,9 @@ import {
     getSessionPlates,
     createSession,
     updateSession,
-    finalizeAuction
+    finalizeAuction,
+    startAuctionPlate,
+    stopAuctionPlate
 } from '../controllers/session.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorizeRoles } from '../middleware/roleAuth.middleware.js';
@@ -25,5 +27,13 @@ router.get('/:id/plates', getSessionPlates);
 router.post('/', authenticate, authorizeRoles('admin'), createSession);
 router.put('/:id', authenticate, authorizeRoles('admin'), updateSession);
 router.post('/:id/finalize', authenticate, authorizeRoles('admin'), finalizeAuction);
+
+/**
+ * Admin: bắt đầu / dừng đấu giá thủ công
+ * POST /api/sessions/plates/:plateId/start  { durationMinutes: 60 }
+ * POST /api/sessions/plates/:plateId/stop
+ */
+router.post('/plates/:plateId/start', authenticate, authorizeRoles('admin'), startAuctionPlate);
+router.post('/plates/:plateId/stop', authenticate, authorizeRoles('admin'), stopAuctionPlate);
 
 export default router;

@@ -4,18 +4,37 @@ import Registration from '../models/Registration.model.js';
 import SessionPlate from '../models/SessionPlate.model.js';
 import Bid from '../models/Bid.model.js';
 import Session from '../models/Session.model.js';
+import biddingService from '../services/bidding.service.js';
 
 let io;
 
 /**
- * Initialize Socket.io server
+ * Map lưu thời gian bid gần nhất của mỗi user để socket-level rate limiting
+ * Format: Map<userId, timestamp_ms>
+ */
+const bidRateLimits = new Map();
+const BID_COOLDOWN_MS = 2000; // 2 giây giữa các lượt bid
+
+/**
+ * Dọn dẹp rate limit map định kỳ để tránh memory leak (mỗi 5 phút)
+ */
+setInterval(() => {
+    const cutoff = Date.now() - 60000;
+    for (const [key, ts] of bidRateLimits.entries()) {
+        if (ts < cutoff) bidRateLimits.delete(key);
+    }
+}, 5 * 60 * 1000);
+
+/**
+ * Khởi tạo Socket.io server
  * @param {Object} httpServer - HTTP server instance
  */
 export const initializeSocket = (httpServer) => {
-    // Support multiple frontend instances
     const allowedOrigins = [
         'http://localhost:5173',
         'http://localhost:5174',
+        'http://localhost:5175',
+        'http://localhost:5176',
         process.env.FRONTEND_URL
     ].filter(Boolean);
 
@@ -27,16 +46,15 @@ export const initializeSocket = (httpServer) => {
         },
         pingTimeout: 60000,
         pingInterval: 25000,
+        // Tăng buffer để handle concurrent events tốt hơn
+        maxHttpBufferSize: 1e6,
     });
 
-    // Middleware: Authenticate socket connections
+    // Middleware: Xác thực kết nối socket
     io.use((socket, next) => {
         try {
             const token = socket.handshake.auth.token;
-
-            if (!token) {
-                return next(new Error('Authentication token required'));
-            }
+            if (!token) return next(new Error('Authentication token required'));
 
             const decoded = verifyToken(token);
             socket.user = decoded;
@@ -46,94 +64,99 @@ export const initializeSocket = (httpServer) => {
         }
     });
 
-    // Connection handler
+    // =========================================================
+    //  Connection Handler
+    // =========================================================
+    // Helper: đếm số user duy nhất trong phòng (tránh đếm trùng multi-tab)
+    const getUniqueViewers = (roomName) => {
+        const socketsInRoom = io.sockets.adapter.rooms.get(roomName);
+        if (!socketsInRoom) return 0;
+        const userIds = new Set();
+        for (const sid of socketsInRoom) {
+            const s = io.sockets.sockets.get(sid);
+            if (s?.user?.id) userIds.add(s.user.id);
+        }
+        return userIds.size;
+    };
+
     io.on('connection', (socket) => {
         const userId = socket.user.id;
         const username = socket.user.username;
 
-        console.log(`✅ User connected: ${username} (${userId})`);
+        console.log(`✅ User connected: ${username} (${userId}) | socketId: ${socket.id}`);
 
-        // Join user-specific room
+        // Join user-specific room để nhận thông báo cá nhân
         socket.join(`user:${userId}`);
 
-        // Send welcome message
         socket.emit('notification', {
             type: 'login_success',
-            message: `Chào mừng ${username}! Bạn đã đăng nhập thành công.`,
+            message: `Chào mừng ${username}!`,
             timestamp: new Date(),
         });
 
-        // JOIN AUCTION ROOM - for specific SessionPlate
+        // =====================================================
+        // JOIN AUCTION ROOM
+        // =====================================================
         socket.on('join_auction', async (data) => {
             try {
-                console.log('📥 join_auction request:', data);
-                console.log('User from socket:', socket.user);
-
                 const { sessionPlateId } = data;
 
                 if (!sessionPlateId) {
-                    console.error('❌ Missing sessionPlateId in join_auction data');
-                    return socket.emit('error', { message: 'SessionPlate ID is required' });
+                    return socket.emit('error', { message: 'SessionPlate ID là bắt buộc' });
                 }
 
-                // Find the SessionPlate
+                // Tìm SessionPlate
                 const sessionPlate = await SessionPlate.findById(sessionPlateId);
                 if (!sessionPlate) {
-                    console.error('❌ SessionPlate not found:', sessionPlateId);
-                    return socket.emit('error', { message: 'Auction not found' });
+                    return socket.emit('error', { message: 'Không tìm thấy phiên đấu giá' });
                 }
 
-                console.log('✅ SessionPlate found:', sessionPlate.plateNumber);
-
-                // Get the parent Session
+                // Tìm Session cha
                 const session = await Session.findById(sessionPlate.sessionId);
                 if (!session) {
-                    console.error('❌ Parent session not found for SessionPlate:', sessionPlateId);
-                    return socket.emit('error', { message: 'Session not found' });
+                    return socket.emit('error', { message: 'Không tìm thấy phòng đấu giá' });
                 }
 
-                console.log('✅ Parent session found:', session.sessionName);
-
-                // Check access: Must have APPROVED registration for this SESSION
-                const registration = await Registration.findOne({
-                    userId: userId,
-                    sessionId: session._id,
-                    status: 'approved',
-                    depositStatus: 'paid'
-                });
-
-                if (!registration) {
-                    console.log('❌ No approved registration found for user:', userId);
-                    socket.emit('error', {
-                        message: 'You must be registered and approved to join this auction'
+                // Kiểm tra quyền tham gia: Admin hoặc user đã được duyệt đăng ký
+                const isAdmin = socket.user.role === 'admin';
+                if (!isAdmin) {
+                    const registration = await Registration.findOne({
+                        userId,
+                        sessionId: session._id,
+                        status: { $in: ['approved', 'won_paid'] }
                     });
-                    return;
+
+                    if (!registration) {
+                        return socket.emit('error', {
+                            message: 'Bạn chưa đăng ký hoặc chưa được duyệt tham gia phiên đấu giá này'
+                        });
+                    }
                 }
 
-                console.log('✅ Registration verified for user:', username);
-
-                // Join auction room
+                // Join room theo sessionPlateId
                 const roomName = `auction:${sessionPlateId}`;
                 socket.join(roomName);
                 socket.currentAuction = sessionPlateId;
 
-                // Get current state
+                // Lấy dữ liệu hiện tại
                 const now = new Date();
                 const timeLeft = sessionPlate.auctionEndTime
                     ? Math.max(0, new Date(sessionPlate.auctionEndTime) - now)
                     : 0;
-                const viewers = io.sockets.adapter.rooms.get(roomName)?.size || 1;
+                const viewers = getUniqueViewers(roomName);
 
-                // Get recent bids
+                // Lấy lịch sử bid gần nhất
                 const recentBids = await Bid.find({ sessionPlateId })
                     .sort({ bidTime: -1 })
-                    .limit(10)
-                    .populate('userId', 'username avatar');
+                    .limit(20)
+                    .populate('userId', 'username avatar')
+                    .lean();
 
-                console.log(`✅ User ${username} joined auction room: ${sessionPlateId}`);
+                console.log(`✅ ${username} joined auction room: ${sessionPlateId}`);
 
+                // Gửi state hiện tại cho user mới join
                 socket.emit('auction_joined', {
-                    message: 'Joined auction room successfully',
+                    message: 'Đã vào phòng đấu giá thành công',
                     sessionPlate: {
                         _id: sessionPlate._id,
                         plateNumber: sessionPlate.plateNumber,
@@ -145,73 +168,135 @@ export const initializeSocket = (httpServer) => {
                         auctionEndTime: sessionPlate.auctionEndTime,
                         timeLeft,
                         totalExtensions: sessionPlate.totalExtensions,
-                        maxExtensions: sessionPlate.maxExtensions
+                        maxExtensions: sessionPlate.maxExtensions,
+                        bidExtensionSeconds: sessionPlate.bidExtensionSeconds,
                     },
                     recentBids,
-                    currentViewers: viewers
+                    currentViewers: viewers,
                 });
 
-                // Notify others
-                socket.to(roomName).emit('user_joined', {
-                    totalViewers: viewers
-                });
+                // Thông báo cho các user khác trong phòng
+                socket.to(roomName).emit('user_joined', { totalViewers: getUniqueViewers(roomName) });
 
             } catch (error) {
-                console.error('Join auction error:', error);
-                socket.emit('error', { message: 'Error joining auction room' });
+                console.error('join_auction error:', error);
+                socket.emit('error', { message: 'Lỗi khi vào phòng đấu giá' });
             }
         });
 
+        // =====================================================
+        // PLACE BID QUA SOCKET (thay vì chỉ HTTP)
+        // Giúp giảm latency đáng kể so với REST API call
+        // =====================================================
+        socket.on('place_bid', async (data) => {
+            const { sessionPlateId, bidAmount } = data;
+
+            // --- Rate Limiting tại socket level ---
+            const rateLimitKey = `bid:${userId}`;
+            const lastBidTime = bidRateLimits.get(rateLimitKey) || 0;
+            const now = Date.now();
+            const timeSinceLast = now - lastBidTime;
+
+            if (timeSinceLast < BID_COOLDOWN_MS) {
+                const retryAfter = Math.ceil((BID_COOLDOWN_MS - timeSinceLast) / 1000);
+                return socket.emit('bid_error', {
+                    message: `Vui lòng chờ ${retryAfter} giây trước khi đặt giá tiếp`,
+                    retryAfter,
+                    code: 'RATE_LIMITED'
+                });
+            }
+
+            // Validate input cơ bản
+            if (!sessionPlateId || typeof bidAmount !== 'number' || bidAmount <= 0) {
+                return socket.emit('bid_error', {
+                    message: 'Dữ liệu đặt giá không hợp lệ',
+                    code: 'INVALID_DATA'
+                });
+            }
+
+            // Cập nhật rate limit TRƯỚC khi xử lý (pessimistic)
+            bidRateLimits.set(rateLimitKey, now);
+
+            try {
+                const ipAddress = socket.handshake.address;
+                const result = await biddingService.placeBid(
+                    sessionPlateId,
+                    userId,
+                    username,
+                    bidAmount,
+                    ipAddress
+                );
+
+                // Xác nhận thành công cho người đặt
+                socket.emit('bid_confirmed', {
+                    success: true,
+                    bidAmount: result.currentPrice,
+                    timeExtended: result.timeExtended,
+                    newEndTime: result.newEndTime,
+                    message: result.message,
+                });
+
+                // Broadcast new_bid tới cả phòng đã được handle trong biddingService.emitBidEvents()
+
+            } catch (error) {
+                // Nếu thất bại → reset rate limit để user thử lại ngay
+                bidRateLimits.set(rateLimitKey, 0);
+                console.error(`❌ place_bid error (${username}):`, error.message);
+
+                socket.emit('bid_error', {
+                    message: error.message || 'Đặt giá thất bại',
+                    code: 'BID_FAILED'
+                });
+            }
+        });
+
+        // =====================================================
         // LEAVE AUCTION ROOM
+        // =====================================================
         socket.on('leave_auction', (data) => {
             const { sessionPlateId } = data;
             if (!sessionPlateId) return;
 
             const roomName = `auction:${sessionPlateId}`;
             socket.leave(roomName);
+            socket.currentAuction = null;
 
-            const viewers = io.sockets.adapter.rooms.get(roomName)?.size || 0;
-            socket.to(roomName).emit('user_left', {
-                totalViewers: viewers
-            });
+            const viewers = getUniqueViewers(roomName);
+            socket.to(roomName).emit('user_left', { totalViewers: viewers });
 
-            console.log(`User ${username} left auction ${sessionPlateId}`);
+            console.log(`👋 ${username} left auction ${sessionPlateId}`);
         });
 
-        // SEND CHAT MESSAGE
+        // =====================================================
+        // CHAT MESSAGE
+        // =====================================================
         socket.on('send_chat_message', async (data) => {
             try {
                 const { sessionPlateId, message } = data;
 
-                if (!message || !message.trim()) {
-                    return socket.emit('error', { message: 'Message cannot be empty' });
+                if (!message?.trim()) {
+                    return socket.emit('error', { message: 'Tin nhắn không được trống' });
                 }
-
                 if (message.length > 500) {
-                    return socket.emit('error', { message: 'Message too long (max 500 characters)' });
+                    return socket.emit('error', { message: 'Tin nhắn quá dài (tối đa 500 ký tự)' });
                 }
 
-                // Get session plate to find roomId and sessionId
                 const sessionPlate = await SessionPlate.findById(sessionPlateId).populate('sessionId');
                 if (!sessionPlate) {
-                    return socket.emit('error', { message: 'Auction not found' });
+                    return socket.emit('error', { message: 'Không tìm thấy phiên đấu giá' });
                 }
 
-                // Import ChatMessage model
                 const ChatMessage = (await import('../models/ChatMessage.model.js')).default;
-
-                // Create chat message
                 const chatMessage = await ChatMessage.create({
                     roomId: sessionPlate.sessionId.roomId,
                     sessionId: sessionPlate.sessionId._id,
-                    userId: userId,
+                    userId,
                     userName: username,
                     userAvatar: socket.user.avatar || '',
                     message: message.trim(),
                     messageType: 'text',
                 });
 
-                // Broadcast to room
                 const roomName = `auction:${sessionPlateId}`;
                 io.to(roomName).emit('new_chat_message', {
                     _id: chatMessage._id,
@@ -223,169 +308,165 @@ export const initializeSocket = (httpServer) => {
                     createdAt: chatMessage.createdAt,
                 });
 
-                console.log(`Chat message from ${username} in auction ${sessionPlateId}`);
             } catch (error) {
-                console.error('Send chat message error:', error);
-                socket.emit('error', { message: 'Error sending message' });
+                console.error('send_chat_message error:', error);
+                socket.emit('error', { message: 'Lỗi khi gửi tin nhắn' });
             }
         });
 
+        // =====================================================
         // TYPING INDICATOR
+        // =====================================================
         socket.on('typing_indicator', (data) => {
             const { sessionPlateId, isTyping } = data;
             if (!sessionPlateId) return;
 
-            const roomName = `auction:${sessionPlateId}`;
-            socket.to(roomName).emit('user_typing', {
-                userId: userId,
+            socket.to(`auction:${sessionPlateId}`).emit('user_typing', {
+                userId,
                 userName: username,
                 isTyping,
             });
         });
 
-        // GET PARTICIPANTS LIST
+        // =====================================================
+        // GET PARTICIPANTS
+        // =====================================================
         socket.on('get_participants', async (data) => {
             try {
                 const { sessionPlateId } = data;
                 const roomName = `auction:${sessionPlateId}`;
-
-                // Get all socket IDs in the room
                 const socketsInRoom = io.sockets.adapter.rooms.get(roomName);
-                const participants = [];
+
+                // Dùng Map để dedup theo userId (tránh cùng user nhiều tab)
+                const participantMap = new Map();
 
                 if (socketsInRoom) {
                     for (const socketId of socketsInRoom) {
-                        const participantSocket = io.sockets.sockets.get(socketId);
-                        if (participantSocket && participantSocket.user) {
-                            participants.push({
-                                userId: participantSocket.user.id,
-                                userName: participantSocket.user.username,
-                                userAvatar: participantSocket.user.avatar || '',
+                        const s = io.sockets.sockets.get(socketId);
+                        if (s?.user && !participantMap.has(s.user.id)) {
+                            participantMap.set(s.user.id, {
+                                userId: s.user.id,
+                                userName: s.user.username,
+                                userAvatar: s.user.avatar || '',
                             });
                         }
                     }
                 }
+
+                const participants = Array.from(participantMap.values());
 
                 socket.emit('participants_list', {
                     participants,
                     totalCount: participants.length,
                 });
             } catch (error) {
-                console.error('Get participants error:', error);
-                socket.emit('error', { message: 'Error fetching participants' });
+                console.error('get_participants error:', error);
+                socket.emit('error', { message: 'Lỗi lấy danh sách người tham gia' });
             }
         });
 
+        // =====================================================
         // GET CHAT HISTORY
+        // =====================================================
         socket.on('get_chat_history', async (data) => {
             try {
                 const { sessionPlateId, limit = 50 } = data;
 
                 const sessionPlate = await SessionPlate.findById(sessionPlateId);
                 if (!sessionPlate) {
-                    return socket.emit('error', { message: 'Auction not found' });
+                    return socket.emit('error', { message: 'Không tìm thấy phiên đấu giá' });
                 }
 
                 const ChatMessage = (await import('../models/ChatMessage.model.js')).default;
+                const messages = await ChatMessage.getRecentMessages(sessionPlate.sessionId, limit);
 
-                const messages = await ChatMessage.getRecentMessages(
-                    sessionPlate.sessionId,
-                    limit
-                );
-
-                socket.emit('chat_history', {
-                    messages: messages.reverse(), // Oldest first
-                });
+                socket.emit('chat_history', { messages: messages.reverse() });
             } catch (error) {
-                console.error('Get chat history error:', error);
-                socket.emit('error', { message: 'Error fetching chat history' });
+                console.error('get_chat_history error:', error);
+                socket.emit('error', { message: 'Lỗi lấy lịch sử chat' });
             }
         });
 
-        // REQUEST CURRENT AUCTION STATE
+        // =====================================================
+        // REQUEST AUCTION STATE (sync lại khi reconnect)
+        // =====================================================
         socket.on('request_auction_state', async (data) => {
             try {
                 const { sessionPlateId } = data;
                 const sessionPlate = await SessionPlate.findById(sessionPlateId);
 
                 if (!sessionPlate) {
-                    return socket.emit('error', { message: 'Auction not found' });
+                    return socket.emit('error', { message: 'Không tìm thấy phiên đấu giá' });
                 }
 
                 const now = new Date();
                 const recentBids = await Bid.find({ sessionPlateId })
                     .sort({ bidTime: -1 })
-                    .limit(10)
-                    .populate('userId', 'username avatar');
+                    .limit(20)
+                    .populate('userId', 'username avatar')
+                    .lean();
 
                 socket.emit('auction_state', {
                     sessionPlate: {
                         currentPrice: sessionPlate.currentPrice,
                         status: sessionPlate.status,
                         timeLeft: Math.max(0, sessionPlate.auctionEndTime - now),
-                        totalExtensions: sessionPlate.totalExtensions
+                        auctionEndTime: sessionPlate.auctionEndTime,
+                        totalExtensions: sessionPlate.totalExtensions,
+                        winnerId: sessionPlate.winnerId,
+                        winnerName: sessionPlate.winnerName,
                     },
                     recentBids
                 });
             } catch (error) {
-                console.error('Request auction state error:', error);
-                socket.emit('error', { message: 'Error fetching auction state' });
+                console.error('request_auction_state error:', error);
+                socket.emit('error', { message: 'Lỗi lấy trạng thái đấu giá' });
             }
         });
 
-        // HEARTBEAT/PING
+        // =====================================================
+        // HEARTBEAT
+        // =====================================================
         socket.on('ping', () => {
             socket.emit('pong', { timestamp: new Date() });
         });
 
-        // Handle custom events
-        socket.on('request_notification', (data) => {
-            socket.emit('notification', {
-                type: 'info',
-                message: data.message || 'Notification received',
-                timestamp: new Date(),
-            });
-        });
-
-        // Disconnect handler
-        socket.on('disconnect', () => {
+        // =====================================================
+        // DISCONNECT
+        // =====================================================
+        socket.on('disconnect', (reason) => {
             if (socket.currentAuction) {
                 const roomName = `auction:${socket.currentAuction}`;
-                const viewers = io.sockets.adapter.rooms.get(roomName)?.size || 0;
-                socket.to(roomName).emit('user_left', {
-                    totalViewers: viewers
-                });
+                // socket đã rời room trước khi disconnect event fire -> dùng getUniqueViewers
+                const viewers = getUniqueViewers(roomName);
+                socket.to(roomName).emit('user_left', { totalViewers: viewers });
             }
-            console.log(`👋 User disconnected: ${username} (${userId})`);
+            // Dọn rate limit entry khi user ngắt kết nối
+            bidRateLimits.delete(`bid:${userId}`);
+            console.log(`👋 User disconnected: ${username} (${userId}) | reason: ${reason}`);
         });
     });
 
-    console.log('✅ Socket.io initialized');
+    console.log('✅ Socket.io initialized with place_bid handler & rate limiting');
     return io;
 };
 
 /**
- * Get Socket.io instance
- * @returns {Object} Socket.io server instance
+ * Lấy Socket.io instance
  */
 export const getIO = () => {
-    if (!io) {
-        throw new Error('Socket.io not initialized');
-    }
+    if (!io) throw new Error('Socket.io chưa được khởi tạo');
     return io;
 };
 
 /**
- * Emit login notification to specific user
- * @param {String} userId - User ID
- * @param {Object} data - Notification data
+ * Gửi thông báo đăng nhập tới user cụ thể
  */
 export const emitLoginNotification = (userId, data) => {
     try {
-        const io = getIO();
-        io.to(`user:${userId}`).emit('login_notification', {
+        getIO().to(`user:${userId}`).emit('login_notification', {
             type: 'login',
-            message: 'Đăng nhập mới phát hiện',
+            message: 'Phát hiện đăng nhập mới',
             ...data,
             timestamp: new Date(),
         });
@@ -395,14 +476,11 @@ export const emitLoginNotification = (userId, data) => {
 };
 
 /**
- * Emit device alert to specific user
- * @param {String} userId - User ID
- * @param {Object} deviceInfo - Device information
+ * Gửi cảnh báo thiết bị mới tới user
  */
 export const emitDeviceAlert = (userId, deviceInfo) => {
     try {
-        const io = getIO();
-        io.to(`user:${userId}`).emit('device_alert', {
+        getIO().to(`user:${userId}`).emit('device_alert', {
             type: 'security',
             message: 'Cảnh báo: Đăng nhập từ thiết bị mới',
             device: deviceInfo,
@@ -414,13 +492,11 @@ export const emitDeviceAlert = (userId, deviceInfo) => {
 };
 
 /**
- * Broadcast notification to all connected users
- * @param {Object} data - Notification data
+ * Broadcast thông báo toàn hệ thống
  */
 export const broadcastNotification = (data) => {
     try {
-        const io = getIO();
-        io.emit('broadcast_notification', {
+        getIO().emit('broadcast_notification', {
             ...data,
             timestamp: new Date(),
         });

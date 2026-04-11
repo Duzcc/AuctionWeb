@@ -22,6 +22,21 @@ const assetSchema = new mongoose.Schema(
             required: [true, 'Starting price is required'],
             min: [0, 'Starting price must be non-negative'],
         },
+        priceStep: {
+            type: Number,
+            default: 5000000, // 5M VND per step for assets
+            min: [500000, 'Price step must be at least 500K VND'],
+        },
+        images: [{
+            type: String, // Multiple images for assets
+        }],
+        specifications: {
+            area: String,      // Diện tích (for real estate)
+            location: String,  // Vị trí chi tiết
+            condition: String, // Tình trạng
+            yearBuilt: Number, // Năm xây dựng
+            legalStatus: String, // Tình trạng pháp lý
+        },
         status: {
             type: String,
             enum: ['available', 'in_auction', 'sold'],
@@ -33,7 +48,7 @@ const assetSchema = new mongoose.Schema(
         },
         image: {
             type: String,
-            default: '', // URL or path to asset image
+            default: '', // URL or path to asset image (deprecated, use images array)
         },
     },
     {

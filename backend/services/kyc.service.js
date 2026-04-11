@@ -281,10 +281,10 @@ class KYCService {
      * Check if user can participate in auctions
      * @param {String} userId
      */
-    async canParticipate(userId) {
+    async canParticipate(userId, sessionId = null) {
         try {
             const user = await User.findById(userId).select(
-                'isProfileComplete kycStatus isBiddingAllowed bannedUntil'
+                'isProfileComplete kycStatus isBiddingAllowed bannedUntil role'
             );
 
             if (!user) {
@@ -292,6 +292,29 @@ class KYCService {
                     canParticipate: false,
                     reason: 'User not found'
                 };
+            }
+
+            // --- BYPASS LOGIC ---
+            // 1. Admin bypass: Admins can always participate/moderating
+            if (user.role === 'admin') {
+                return { canParticipate: true };
+            }
+
+            // 2. Approved registration bypass: 
+            // If the user already has an approved registration for this specific session,
+            // we trust that the admin already verified them.
+            if (sessionId) {
+                // Dynamically import to avoid circular dependencies if any
+                const Registration = (await import('../models/Registration.model.js')).default;
+                const registration = await Registration.findOne({
+                    userId,
+                    sessionId: sessionId,
+                    status: { $in: ['approved', 'won_paid'] }
+                });
+
+                if (registration) {
+                    return { canParticipate: true };
+                }
             }
 
             if (!user.isProfileComplete) {

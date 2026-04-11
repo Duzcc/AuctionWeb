@@ -1,100 +1,86 @@
-import { useState, useEffect } from 'react';
+import { memo } from 'react';
+import { Clock, Zap } from 'lucide-react';
 
 /**
- * Countdown timer component for auction end time
- * @param {Date} endTime - The auction end time
- * @param {Boolean} hasEnded - Whether auction has ended
+ * CountdownTimer — Đồng hồ đếm ngược với visual states:
+ * - Normal: trắng
+ * - Warning (≤60s): vàng amber
+ * - Critical (≤30s): đỏ + pulse glow
+ * - Urgent (≤10s): đỏ đậm + shake animation
  */
-export default function CountdownTimer({ endTime, hasEnded }) {
-    const [timeLeft, setTimeLeft] = useState(null);
+const CountdownTimer = memo(function CountdownTimer({
+    endTime,
+    timeLeftSeconds,
+    extensionCount = 0,
+    maxExtensions = 10,
+}) {
+    // Safety guard: nếu timeLeftSeconds là NaN/null/undefined thì fallback về 0
+    const safeSecs = (Number.isFinite(timeLeftSeconds) && timeLeftSeconds >= 0)
+        ? timeLeftSeconds
+        : 0;
 
-    useEffect(() => {
-        if (!endTime || hasEnded) {
-            setTimeLeft(null);
-            return;
-        }
+    const minutes = Math.floor(safeSecs / 60);
+    const seconds = safeSecs % 60;
 
-        const calculateTimeLeft = () => {
-            const now = new Date();
-            const end = new Date(endTime);
-            const diff = end - now;
+    const isUrgent   = safeSecs <= 10 && safeSecs > 0;
+    const isCritical = safeSecs <= 30 && safeSecs > 10;
+    const isWarning  = safeSecs <= 60 && safeSecs > 30;
+    // Chỉ coi là ended khi đã nhận được endTime nhưng đã hết giờ
+    const isEnded = !!endTime && safeSecs <= 0;
 
-            if (diff <= 0) {
-                return null;
-            }
-
-            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-            const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-
-            return { days, hours, minutes, seconds, total: diff };
-        };
-
-        setTimeLeft(calculateTimeLeft());
-
-        const interval = setInterval(() => {
-            const newTimeLeft = calculateTimeLeft();
-            setTimeLeft(newTimeLeft);
-
-            if (!newTimeLeft) {
-                clearInterval(interval);
-            }
-        }, 1000);
-
-        return () => clearInterval(interval);
-    }, [endTime, hasEnded]);
-
-    if (hasEnded) {
-        return (
-            <div className="countdown-timer ended">
-                <span className="status-badge ended">🏁 Đã kết thúc</span>
-            </div>
-        );
-    }
-
-    if (!timeLeft) {
-        return (
-            <div className="countdown-timer loading">
-                <span className="status-badge">⏳ Đang tải...</span>
-            </div>
-        );
-    }
-
-    const isUrgent = timeLeft.total < 5 * 60 * 1000; // Less than 5 minutes
-    const isCritical = timeLeft.total < 60 * 1000; // Less than 1 minute
+    const colorClass = isEnded
+        ? 'timer--ended'
+        : isUrgent
+            ? 'timer--urgent'
+            : isCritical
+                ? 'timer--critical'
+                : isWarning
+                    ? 'timer--warning'
+                    : 'timer--normal';
 
     return (
-        <div className={`countdown-timer ${isUrgent ? 'urgent' : ''} ${isCritical ? 'critical' : ''}`}>
-            <div className="time-label">⏰ Thời gian còn lại:</div>
-            <div className="time-display">
-                {timeLeft.days > 0 && (
-                    <div className="time-unit">
-                        <span className="value">{timeLeft.days}</span>
-                        <span className="label">ngày</span>
-                    </div>
+        <div className={`countdown-timer ${colorClass}`}>
+            <div className="timer-label">
+                <Clock className="w-3.5 h-3.5" />
+                <span>Thời gian còn lại</span>
+                {extensionCount > 0 && (
+                    <span className="timer-extension-badge">
+                        <Zap className="w-2.5 h-2.5" />
+                        +{extensionCount}
+                    </span>
                 )}
-                {(timeLeft.days > 0 || timeLeft.hours > 0) && (
-                    <div className="time-unit">
-                        <span className="value">{String(timeLeft.hours).padStart(2, '0')}</span>
-                        <span className="label">giờ</span>
-                    </div>
-                )}
+            </div>
+
+            <div className="timer-display">
                 <div className="time-unit">
-                    <span className="value">{String(timeLeft.minutes).padStart(2, '0')}</span>
-                    <span className="label">phút</span>
+                    <span className={`time-value ${isUrgent ? 'time-value--urgent' : ''}`}>
+                        {String(minutes).padStart(2, '0')}
+                    </span>
                 </div>
+                <div className="timer-separator">:</div>
                 <div className="time-unit">
-                    <span className="value">{String(timeLeft.seconds).padStart(2, '0')}</span>
-                    <span className="label">giây</span>
+                    <span className={`time-value ${isUrgent ? 'time-value--urgent' : ''}`}>
+                        {String(seconds).padStart(2, '0')}
+                    </span>
                 </div>
             </div>
-            {isUrgent && !isCritical && (
-                <div className="warning-text">⚠️ Sắp hết giờ!</div>
+
+            {!isEnded && (
+                <div className="timer-progress-bg">
+                    <div
+                        className={`timer-progress-fill ${colorClass}`}
+                        style={{
+                            width: `${Math.min(100, (timeLeftSeconds / 300) * 100)}%`,
+                            transition: 'width 1s linear',
+                        }}
+                    />
+                </div>
             )}
-            {isCritical && (
-                <div className="critical-text">🔥 Chỉ còn dưới 1 phút!</div>
-            )}
+
+            {isEnded && <div className="timer-ended-text">ĐÃ KẾT THÚC</div>}
+            {isUrgent && !isEnded && <div className="timer-urgent-text">⚡ Sắp kết thúc!</div>}
         </div>
     );
-}
+});
+
+export default CountdownTimer;

@@ -54,6 +54,7 @@ class AuctionCronJobs {
      */
     async autoStartAuctions(now) {
         try {
+            // CASE 1: Plates có đủ auctionEndTime → khởi động bình thường
             const auctionsToStart = await SessionPlate.find({
                 status: 'pending',
                 auctionStartTime: { $lte: now },
@@ -61,12 +62,44 @@ class AuctionCronJobs {
             });
 
             if (auctionsToStart.length > 0) {
-                console.log(`  🟢 Starting ${auctionsToStart.length} auctions...`);
-
+                console.log(`  🟢 Starting ${auctionsToStart.length} auctions (case 1)...`);
                 for (const auction of auctionsToStart) {
                     auction.status = 'bidding';
                     await auction.save();
                     console.log(`    ✓ Started: ${auction.plateNumber}`);
+                }
+            }
+
+            // CASE 2: Plates chưa có auctionEndTime → lấy endTime từ Session cha
+            const auctionsMissingEndTime = await SessionPlate.find({
+                status: 'pending',
+                auctionStartTime: { $lte: now },
+                $or: [
+                    { auctionEndTime: null },
+                    { auctionEndTime: { $exists: false } }
+                ]
+            }).populate('sessionId');
+
+            if (auctionsMissingEndTime.length > 0) {
+                console.log(`  🟡 Fixing ${auctionsMissingEndTime.length} auctions with missing endTime...`);
+                for (const auction of auctionsMissingEndTime) {
+                    const session = auction.sessionId;
+                    // Dùng Session.endTime nếu có; fallback: auctionStartTime + 60 phút
+                    const derivedEndTime = session?.endTime
+                        ? new Date(session.endTime)
+                        : new Date(now.getTime() + 60 * 60 * 1000);
+
+                    if (derivedEndTime > now) {
+                        auction.auctionEndTime = derivedEndTime;
+                        auction.status = 'bidding';
+                        await auction.save();
+                        console.log(`    ✓ Fixed & Started: ${auction.plateNumber} → ends ${derivedEndTime.toISOString()}`);
+                    } else {
+                        // endTime đã qua → mark unsold
+                        auction.status = 'unsold';
+                        await auction.save();
+                        console.log(`    ✗ Expired without bids: ${auction.plateNumber}`);
+                    }
                 }
             }
         } catch (error) {

@@ -21,6 +21,9 @@ export const authenticate = async (req, res, next) => {
 
         // Verify token
         const decoded = verifyToken(token);
+        
+        // Normalize: Backend controllers expect req.user.userId but payload uses id
+        decoded.userId = decoded.userId || decoded.id;
 
         // Attach user info to request object
         req.user = decoded;

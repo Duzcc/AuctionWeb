@@ -1,6 +1,115 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Tag, UserPlus, HandCoins, Trophy, Eye, Target, Award, Car, Home, Gavel } from 'lucide-react';
+import { Search, Tag, UserPlus, HandCoins, Trophy, Eye, Target, Award, Car, Home, Gavel, Users, Clock, TrendingUp, ArrowRight } from 'lucide-react';
+import axios from '@/services/axiosInstance';
+
+// ── LiveAuctions mini-component ───────────────────────────────────────────────
+function LiveAuctionsSection() {
+    const navigate = useNavigate();
+    const [sessions, setSessions] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [, setTicks] = useState(0);
+
+    useEffect(() => {
+        axios.get('/sessions', { params: { status: 'active', limit: 4 } })
+            .then(res => {
+                const data = res.data?.data || res.data;
+                setSessions(Array.isArray(data) ? data.slice(0, 4) : []);
+            })
+            .catch(() => setSessions([]))
+            .finally(() => setLoading(false));
+    }, []);
+
+    useEffect(() => {
+        const t = setInterval(() => setTicks(p => p + 1), 1000);
+        return () => clearInterval(t);
+    }, []);
+
+    const getTimeLeft = (endTime) => {
+        const diff = Math.max(0, new Date(endTime) - Date.now()) / 1000;
+        const h = Math.floor(diff / 3600);
+        const m = Math.floor((diff % 3600) / 60);
+        const s = Math.floor(diff % 60);
+        if (diff <= 0) return { label: 'Đã kết thúc', urgent: true };
+        if (h > 0) return { label: `${h}g ${String(m).padStart(2, '0')}p`, urgent: false };
+        return { label: `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`, urgent: m < 5 };
+    };
+
+    const formatVND = (n) => (n || 0) >= 1_000_000
+        ? `${((n || 0) / 1_000_000).toFixed(0)}M`
+        : `${((n || 0) / 1000).toFixed(0)}K`;
+
+    if (loading || sessions.length === 0) return null;
+
+    return (
+        <section className="py-16" style={{ background: 'linear-gradient(180deg, #1a1a1a 0%, #2d2d2d 100%)' }}>
+            <div className="container mx-auto px-4">
+                <div className="flex items-center justify-between mb-8">
+                    <div>
+                        <div className="flex items-center gap-2 mb-2">
+                            <span className="relative flex h-2.5 w-2.5">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+                            </span>
+                            <span className="text-red-400 text-sm font-bold uppercase tracking-wider">Đang diễn ra</span>
+                        </div>
+                        <h2 className="text-2xl md:text-3xl font-black text-white">Phiên đấu giá LIVE</h2>
+                    </div>
+                    <Link to="/car-auction" className="hidden md:flex items-center gap-2 text-[#D4AF37] hover:text-[#F0CC50] font-semibold text-sm transition-colors">
+                        Xem tất cả <ArrowRight className="w-4 h-4" />
+                    </Link>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                    {sessions.map((session) => {
+                        const { label, urgent } = getTimeLeft(session.endTime || session.auctionEndTime);
+                        const plates = session.totalPlates || session.sessionPlates?.length || '—';
+                        const currentPrice = session.currentHighestBid || session.startingPrice || 0;
+                        const bidCount = session.totalBids || session.bids?.length || 0;
+                        const participants = session.participantCount || session.participants?.length || 0;
+                        const roomType = session.type || session.roomType || 'car';
+                        return (
+                            <div
+                                key={session._id}
+                                onClick={() => navigate(`/lobby/${session._id}`)}
+                                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.2)', borderRadius: 20, padding: '1.25rem', cursor: 'pointer', transition: 'all 0.2s', backdropFilter: 'blur(10px)' }}
+                                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; e.currentTarget.style.borderColor = 'rgba(212,175,55,0.5)'; e.currentTarget.style.transform = 'translateY(-3px)'; }}
+                                onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = 'rgba(212,175,55,0.2)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                            >
+                                <div className="flex items-center justify-between mb-3">
+                                    <span style={{ background: roomType === 'car' ? 'rgba(99,102,241,0.2)' : 'rgba(16,185,129,0.2)', color: roomType === 'car' ? '#818CF8' : '#34D399', fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px', borderRadius: 100, textTransform: 'uppercase' }}>
+                                        {roomType === 'car' ? '🚗 Ô tô' : roomType === 'motorbike' ? '🏍 Xe máy' : '🏛 Tài sản'}
+                                    </span>
+                                    <span style={{ color: urgent ? '#F87171' : '#34D399', fontSize: '0.8rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <Clock style={{ width: 12, height: 12 }} /> {label}
+                                    </span>
+                                </div>
+                                <p className="font-bold text-white text-sm mb-1 truncate">{session.name || session.title || `Phiên #${session._id?.slice(-6)}`}</p>
+                                <p className="text-gray-400 text-xs mb-3 truncate">{plates} biển số đang đấu giá</p>
+                                {currentPrice > 0 && (
+                                    <div style={{ background: 'rgba(212,175,55,0.1)', borderRadius: 10, padding: '0.5rem 0.75rem', marginBottom: '0.75rem' }}>
+                                        <p style={{ fontSize: '0.7rem', color: '#9CA3AF', marginBottom: 2 }}>Giá hiện tại</p>
+                                        <p style={{ fontSize: '1.1rem', fontWeight: 800, color: '#D4AF37' }}>{formatVND(currentPrice)} VNĐ</p>
+                                    </div>
+                                )}
+                                <div className="flex items-center justify-between">
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#6B7280' }}><Users style={{ width: 12, height: 12 }} /> {participants} người</span>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: '#6B7280' }}><TrendingUp style={{ width: 12, height: 12 }} /> {bidCount} giá</span>
+                                    <span style={{ padding: '4px 12px', borderRadius: 100, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', fontSize: '0.7rem', fontWeight: 700 }}>Vào phòng →</span>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+                <div className="flex justify-center mt-6 md:hidden">
+                    <Link to="/car-auction" className="flex items-center gap-2 text-[#D4AF37] font-semibold text-sm">
+                        Xem tất cả phiên <ArrowRight className="w-4 h-4" />
+                    </Link>
+                </div>
+            </div>
+        </section>
+    );
+}
 
 export default function HomePage() {
     const navigate = useNavigate();
@@ -249,6 +358,9 @@ export default function HomePage() {
                     </div>
                 </div>
             </section>
+
+            {/* Live Auctions Section */}
+            <LiveAuctionsSection />
 
             {/* Services Section */}
             <section

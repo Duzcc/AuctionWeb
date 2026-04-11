@@ -114,6 +114,9 @@ export async function seedSessions(rooms, { cars = [], motorbikes = [], assets =
                     let currentPrice = startingPrice;
                     let finalPrice = null;
 
+                    let auctionStartTime = null;
+                    let auctionEndTime = null;
+
                     if (session.status === 'completed') {
                         status = Math.random() < 0.7 ? 'sold' : 'unsold';
                         if (status === 'sold') {
@@ -121,9 +124,17 @@ export async function seedSessions(rooms, { cars = [], motorbikes = [], assets =
                             currentPrice = finalPrice;
                         }
                     } else if (session.status === 'ongoing') {
-                        if (i < 5 && Math.random() < 0.5) {
+                        // Force the very first item (our 29A.55555) to be 'pending' so the user can test the Admin "Force Start" flow interactively
+                        if (itemIndex - 1 === 0 && itemType === 'CarPlate') {
+                            status = 'pending';
+                        } 
+                        else if (i < 5 && Math.random() < 0.5) {
                             status = 'bidding';
                             currentPrice = startingPrice + Math.floor(Math.random() * startingPrice * 0.2);
+                            // To prevent time errors, mock the start and end times
+                            auctionStartTime = new Date();
+                            // End time 60 minutes from now
+                            auctionEndTime = new Date(auctionStartTime.getTime() + 60 * 60 * 1000); 
                         }
                     }
 
@@ -137,7 +148,9 @@ export async function seedSessions(rooms, { cars = [], motorbikes = [], assets =
                         priceStep: item.priceStep || 1000000, // Required field, default 1M VND
                         currentPrice,
                         finalPrice,
-                        status
+                        status,
+                        auctionStartTime,
+                        auctionEndTime
                     });
                 }
             });

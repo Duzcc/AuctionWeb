@@ -60,16 +60,15 @@ export default function PaymentPage() {
                     const res = await axios.get(`/sessions/${auctionId}`);
                     if (res.data.success) {
                         const session = res.data.data;
-                        // Find the plate won by user? 
-                        // Simplified: Assume session has one plate or we picked the right one
-                        // Ideally we need registration info too to know deposit.
-                        // Let's fetch registration for this session too.
                         const regRes = await axios.get('/registrations/my');
                         const myReg = regRes.data.data.find(r => r.sessionId._id === auctionId || r.sessionId === auctionId);
 
+                        // Fetch plates explicitly since they are not populated in the session object
+                        const platesRes = await axios.get(`/sessions/${auctionId}/plates`);
+                        const plates = platesRes.data.data || [];
+
                         // Find the won plate in session
-                        // Assuming single plate session for now or just taking the first sold one
-                        const plate = session.plates?.find(p => p.winnerId === user?._id || p.status === 'sold') || session.plates?.[0]; // Fallback
+                        const plate = plates.find(p => p.winnerId === user?._id || p.status === 'sold') || plates[0]; // Fallback
 
                         setAuctionPaymentData({
                             session,
@@ -296,11 +295,13 @@ export default function PaymentPage() {
                 // Let's check `payment.controller.js` again.
                 // It seems I need to create the payment first.
 
-                const createRes = await axios.post('/payments/deposit', { // Reusing deposit endpoint for creation?
+                const createRes = await axios.post('/payments/deposit', {
                     registrationId: auctionPaymentData.registration?._id,
                     amount: totalAmount,
-                    paymentMethod: selectedMethod,
-                    type: 'auction_remaining' // New type
+                    feeAmount: 0,
+                    method: selectedMethod,
+                    transactionCode: transactionRef || paymentDesc,
+                    type: 'auction_remaining'
                 });
 
                 if (createRes.data.success) {

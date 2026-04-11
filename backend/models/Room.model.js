@@ -7,6 +7,16 @@ const roomSchema = new mongoose.Schema(
             required: [true, 'Room name is required'],
             trim: true,
         },
+        roomType: {
+            type: String,
+            enum: ['CarPlate', 'MotorbikePlate', 'Asset', 'General'],
+            default: 'General',
+            required: [true, 'Room type is required'],
+        },
+        specialization: {
+            type: String, // e.g., 'Xe hơi cao cấp', 'Xe máy phân khối lớn'
+            trim: true,
+        },
         location: {
             type: String,
             required: [true, 'Location is required'],
@@ -19,6 +29,10 @@ const roomSchema = new mongoose.Schema(
         },
         description: {
             type: String,
+            trim: true,
+        },
+        bannerImage: {
+            type: String, // URL to room banner image
             trim: true,
         },
         isActive: {
@@ -96,6 +110,7 @@ const roomSchema = new mongoose.Schema(
 // Index for performance
 roomSchema.index({ location: 1 });
 roomSchema.index({ isActive: 1 });
+roomSchema.index({ roomType: 1 });
 
 const Room = mongoose.model('Room', roomSchema);
 

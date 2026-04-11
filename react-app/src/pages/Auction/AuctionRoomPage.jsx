@@ -1,378 +1,509 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import useSocket from '../../hooks/useSocket';
-import useRoomSocket from '../../hooks/useRoomSocket';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'react-hot-toast';
-import { Clock, DollarSign, User, Shield, AlertTriangle, Gavel } from 'lucide-react';
+import {
+    Gavel, Users, Shield, LogOut, Volume2, VolumeX,
+    DollarSign, AlertCircle, Wifi, WifiOff, Eye
+} from 'lucide-react';
 import axios from '@/services/axiosInstance';
+import { useAuctionRoom } from '../../hooks/useAuctionRoom';
 import ChatBox from '../../components/auction/ChatBox';
 import ParticipantsList from '../../components/auction/ParticipantsList';
+import BidHistorySidebar from '../../components/auction/BidHistorySidebar';
+import CountdownTimer from '../../components/auction/CountdownTimer';
+import PriceDisplay from '../../components/auction/PriceDisplay';
+import WinnerOverlay from '../../components/auction/WinnerOverlay';
 import soundEffects from '../../utils/soundEffects';
-import keyboardShortcuts, { SHORTCUTS } from '../../utils/keyboardShortcuts';
+import './AuctionRoom.css';
 
 export default function AuctionRoomPage() {
     const { sessionId } = useParams();
     const navigate = useNavigate();
-    const { socket, isConnected } = useSocket();
     const { user } = useAuth();
 
-    // State
-    const [session, setSession] = useState(null);
-    const [currentPrice, setCurrentPrice] = useState(0);
-    const [bids, setBids] = useState([]);
-    const [timeLeft, setTimeLeft] = useState(0);
-    const [bidAmount, setBidAmount] = useState(0);
-    const [error, setError] = useState(null);
-    const [status, setStatus] = useState('loading');
+    // ─── Fetch initial session info ───────────────────────────
+    const [sessionInfo, setSessionInfo] = useState(null);
     const [sessionPlateId, setSessionPlateId] = useState(null);
+    const [initialPlateData, setInitialPlateData] = useState(null); // data từ HTTP trước khi socket ready
+    const [pageLoading, setPageLoading] = useState(true);
+    const [pageError, setPageError] = useState(null);
 
-    // UI State for new components
-    const [showChat, setShowChat] = useState(true);
-    const [showParticipants, setShowParticipants] = useState(true);
-    const [soundEnabled, setSoundEnabled] = useState(true);
-    const bidInputRef = useRef(null);
-
-    // Room socket for chat and participants
-    const {
-        messages,
-        participants,
-        typingUsers,
-        isConnected: roomSocketConnected,
-        sendMessage,
-        sendTyping,
-    } = useRoomSocket(sessionPlateId, !!sessionPlateId);
-
-    // Sound effects setup
     useEffect(() => {
-        soundEffects.setEnabled(soundEnabled);
-    }, [soundEnabled]);
-
-
-    // Fetch Session Detail Initial
-    useEffect(() => {
-        const fetchSession = async () => {
+        const loadSession = async () => {
             try {
-                const res = await axios.get(`/sessions/${sessionId}`);
-                if (res.data.success) {
-                    setSession(res.data.data);
-                    setCurrentPrice(res.data.data.currentPrice || res.data.data.depositAmount || 0);
-                    setStatus('active');
+                // Lấy thông tin session
+                const [sessionRes, platesRes] = await Promise.all([
+                    axios.get(`/sessions/${sessionId}`),
+                    axios.get(`/sessions/${sessionId}/plates`),
+                ]);
 
-                    // Set sessionPlateId for room socket
-                    if (res.data.data.plates && res.data.data.plates.length > 0) {
-                        setSessionPlateId(res.data.data.plates[0]._id);
-                    }
+                if (sessionRes.data?.success) {
+                    setSessionInfo(sessionRes.data.data);
                 }
+
+                // Lấy plates từ session
+                const plates = platesRes.data?.data || platesRes.data?.items || [];
+
+                if (plates.length === 0) {
+                    setPageError('Phiên đấu giá này chưa có biển số nào');
+                    return;
+                }
+
+                // Ưu tiên plate đang bidding; nếu không có thì lấy cái đầu tiên
+                const activePlate = plates.find(p => p.status === 'bidding') || plates[0];
+
+                if (!activePlate?._id) {
+                    setPageError('Không tìm thấy thông tin biển số đấu giá');
+                    return;
+                }
+
+                // Lưu plate data ban đầu để hiển thị khi socket chưa kết nối xong
+                setInitialPlateData(activePlate);
+                setSessionPlateId(activePlate._id);
+
             } catch (err) {
-                console.error("Error fetching session:", err);
-                setError("Không tìm thấy phiên đấu giá");
-                setStatus('error');
+                console.error('Load session error:', err);
+                setPageError(err.response?.data?.message || 'Không thể tải phiên đấu giá. Vui lòng thử lại.');
+            } finally {
+                setPageLoading(false);
             }
         };
-        fetchSession();
+        if (sessionId) loadSession();
     }, [sessionId]);
 
-    // Socket Connection & Events
+
+    // ─── Real-time Auction Hook ───────────────────────────────
+    const {
+        auctionData, currentPrice, endTime, status,
+        viewers, totalExtensions, winner, priceStep,
+        minimumNextBid, bids, latestBid, newBidFlash,
+        messages, typingUsers, participants,
+        isConnected, error: socketError, reconnectCount,
+        isPlacingBid, bidError, rateLimitRemaining, canBid,
+        placeBid, sendMessage, sendTyping, refreshParticipants,
+    } = useAuctionRoom(sessionPlateId);
+
+    // ─── Countdown ────────────────────────────────────────────
+    const [timeLeftSeconds, setTimeLeftSeconds] = useState(0);
     useEffect(() => {
-        if (!socket || !isConnected || !sessionId) return;
-
-        // Join Room
-        socket.emit('join_auction', { sessionId });
-
-        // Listeners
-        socket.on('joined_auction', (data) => {
-            toast.success("Đã vào phòng đấu giá");
-            soundEffects.playSuccessSound();
-        });
-
-        socket.on('bid_update', (data) => {
-            setCurrentPrice(data.newPrice);
-            setBids(prev => [{
-                id: Date.now(),
-                user: data.winnerName,
-                amount: data.newPrice,
-                time: new Date()
-            }, ...prev]);
-            toast.success(`Giá mới: ${data.newPrice.toLocaleString()}`);
-            soundEffects.playBidSound();
-        });
-
-        socket.on('error', (data) => {
-            toast.error(data.message);
-            setError(data.message);
-        });
-
-        socket.on('bid_error', (data) => {
-            toast.error(data.message);
-        });
-
-        return () => {
-            socket.off('joined_auction');
-            socket.off('bid_update');
-            socket.off('error');
-            socket.off('bid_error');
+        // endTime null hoặc Invalid Date → reset về 0, không set timer
+        if (!endTime || isNaN(endTime.getTime())) {
+            setTimeLeftSeconds(0);
+            return;
+        }
+        const tick = () => {
+            const diff = Math.max(0, Math.floor((endTime - Date.now()) / 1000));
+            setTimeLeftSeconds(diff);
         };
-    }, [socket, isConnected, sessionId]);
+        tick();
+        const id = setInterval(tick, 1000);
+        return () => clearInterval(id);
+    }, [endTime]);
 
-    // Timer Logic with sound warning
+    // ─── Sound ────────────────────────────────────────────────
+    const [soundEnabled, setSoundEnabled] = useState(true);
+    useEffect(() => { soundEffects.setEnabled(soundEnabled); }, [soundEnabled]);
+
+    // Sound on new bid
     useEffect(() => {
-        if (!session?.endTime) return;
-        const interval = setInterval(() => {
-            const now = new Date();
-            const end = new Date(session.endTime);
-            const diff = Math.floor((end - now) / 1000);
-
-            if (diff <= 0) {
-                setTimeLeft(0);
-                setStatus('ended');
-                soundEffects.playEndSound();
-                clearInterval(interval);
-            } else {
-                setTimeLeft(diff);
-                // Warning sound at 60 seconds
-                if (diff === 60) {
-                    soundEffects.playWarningSound();
-                    toast('⚠️ Còn 1 phút!', { icon: '⏰' });
-                }
-                // Warning sound at 10 seconds
-                if (diff === 10) {
-                    soundEffects.playWarningSound();
-                }
-            }
-        }, 1000);
-        return () => clearInterval(interval);
-    }, [session]);
-
-    const handleBid = async () => {
-        if (!socket || !isConnected) {
-            toast.error("Mất kết nối máy chủ");
-            return;
+        if (latestBid) {
+            soundEffects.playBidSound?.();
+            if (timeLeftSeconds <= 30) soundEffects.playWarningSound?.();
         }
-        if (bidAmount <= currentPrice) {
-            toast.error("Giá đặt phải cao hơn giá hiện tại");
-            return;
-        }
+    }, [latestBid]);
 
-        const plateId = session?.plates?.[0]?._id;
-        if (!plateId) {
-            toast.error("Không tìm thấy thông tin biển số");
-            return;
-        }
-
-        try {
-            const res = await axios.post('/bids', {
-                sessionPlateId: plateId,
-                amount: Number(bidAmount)
-            });
-
-            if (res.data.success) {
-                toast.success('Đặt giá thành công!');
-                soundEffects.playSuccessSound();
-            }
-        } catch (error) {
-            console.error('Bid error:', error);
-            toast.error(error.response?.data?.message || 'Lỗi khi đặt giá');
-        }
-    };
-
-    // Quick bid function
-    const quickBid = (multiplier = 1) => {
-        if (status !== 'active') return;
-        const step = 1000000; // Default step
-        setBidAmount(currentPrice + (step * multiplier));
-        setTimeout(() => handleBid(), 100);
-    };
-
-    // Keyboard shortcuts
+    // Sound on time warnings
+    const warnedRef = useRef({ s60: false, s10: false });
     useEffect(() => {
-        keyboardShortcuts.startListening();
+        if (timeLeftSeconds === 60 && !warnedRef.current.s60) {
+            warnedRef.current.s60 = true;
+            soundEffects.playWarningSound?.();
+            toast('⏰ Còn 1 phút!', { icon: '⚡', duration: 3000 });
+        }
+        if (timeLeftSeconds === 10 && !warnedRef.current.s10) {
+            warnedRef.current.s10 = true;
+            soundEffects.playWarningSound?.();
+        }
+        if (timeLeftSeconds === 0 && status === 'active') {
+            soundEffects.playEndSound?.();
+        }
+    }, [timeLeftSeconds, status]);
 
-        // Register shortcuts
-        keyboardShortcuts.register(SHORTCUTS.QUICK_BID, () => quickBid(1));
-        keyboardShortcuts.register(SHORTCUTS.BID_1X, () => quickBid(1));
-        keyboardShortcuts.register(SHORTCUTS.BID_2X, () => quickBid(2));
-        keyboardShortcuts.register(SHORTCUTS.BID_5X, () => quickBid(5));
-        keyboardShortcuts.register(SHORTCUTS.TOGGLE_CHAT, () => setShowChat(prev => !prev));
-        keyboardShortcuts.register(SHORTCUTS.TOGGLE_PARTICIPANTS, () => setShowParticipants(prev => !prev));
-        keyboardShortcuts.register(SHORTCUTS.FOCUS_BID_INPUT, () => bidInputRef.current?.focus());
-        keyboardShortcuts.register(SHORTCUTS.ESCAPE, () => navigate(-1));
+    // ─── Bid input state ──────────────────────────────────────
+    const [bidInput, setBidInput] = useState('');
+    const [showWinner, setShowWinner] = useState(true);
+    const bidInputRef = useRef(null);
 
-        return () => {
-            keyboardShortcuts.stopListening();
-            keyboardShortcuts.clearAll();
-        };
-    }, [status, currentPrice, session]);
-
-    const formatTime = (s) => {
-        const m = Math.floor(s / 60);
-        const second = s % 60;
-        return `${m.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')}`;
-    };
-
-    if (status === 'error') return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100">
-            <div className="bg-white p-8 rounded-xl shadow-lg text-center">
-                <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-                <h2 className="text-xl font-bold text-gray-800 mb-2">Lỗi truy cập</h2>
-                <p className="text-gray-600 mb-4">{error}</p>
-                <button onClick={() => navigate('/auction-history')} className="text-blue-600 hover:underline">Quay lại lịch sử</button>
+    // Khi có bid mới → toast
+    useEffect(() => {
+        if (!latestBid) return;
+        const isOwnBid = latestBid.userId === user?.id;
+        toast.custom((t) => (
+            <div className={`bg-gray-900 border border-amber-500/30 text-white px-4 py-3 rounded-xl shadow-xl ${t.visible ? 'animate-enter' : 'animate-leave'}`}>
+                <div className="font-bold text-amber-400">
+                    {isOwnBid ? 'Bạn vừa đặt giá' : latestBid.userName}
+                </div>
+                <div className="text-sm text-gray-300">
+                    {(latestBid.bidAmount).toLocaleString('vi-VN')} VNĐ
+                </div>
             </div>
-        </div>
-    );
+        ), { duration: 2500 });
+    }, [latestBid]);
+
+    const handleSubmitBid = useCallback(() => {
+        const amount = parseInt(String(bidInput).replace(/[^0-9]/g, ''), 10);
+        if (!amount || isNaN(amount)) {
+            toast.error('Vui lòng nhập giá hợp lệ');
+            return;
+        }
+        if (amount < minimumNextBid) {
+            toast.error(`Giá tối thiểu: ${minimumNextBid.toLocaleString('vi-VN')} VNĐ`);
+            return;
+        }
+        const ok = placeBid(amount);
+        if (ok) {
+            setBidInput('');
+            toast.loading('Đang đặt giá...', { id: 'bid-placing', duration: 2000 });
+        }
+    }, [bidInput, minimumNextBid, placeBid]);
+
+    // Hiển thị toast khi bid confirmed/error
+    useEffect(() => {
+        if (!isPlacingBid && bidError) {
+            toast.dismiss('bid-placing');
+            toast.error(bidError, { id: 'bid-error' });
+        }
+    }, [isPlacingBid, bidError]);
+
+    const setQuickBid = (steps) => {
+        const amount = minimumNextBid + (priceStep * (steps - 1));
+        setBidInput(String(amount));
+    };
+
+    const handleForceStart = async () => {
+        if (!window.confirm("Bắt đầu phiên đấu giá này ngay lập tức?")) return;
+        try {
+            await axios.post(`/sessions/plates/${sessionPlateId}/start`);
+            toast.success("Đã bắt đầu đấu giá!");
+        } catch (err) {
+            toast.error(err.response?.data?.message || "Không thể bắt đầu");
+        }
+    };
+
+    // ─── Error / Loading screens ──────────────────────────────
+    if (pageLoading) {
+        return (
+            <div className="auction-room" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ textAlign: 'center' }}>
+                    <div style={{ width: 48, height: 48, border: '3px solid #D4AF37', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 1rem' }} />
+                    <p style={{ color: '#A1A1AA' }}>Đang tải phiên đấu giá...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (pageError || socketError) {
+        return (
+            <div className="auction-room" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ textAlign: 'center', maxWidth: 400 }}>
+                    <AlertCircle style={{ width: 48, height: 48, color: '#EF4444', margin: '0 auto 1rem' }} />
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.5rem' }}>Không thể truy cập</h2>
+                    <p style={{ color: '#A1A1AA', marginBottom: '1.5rem' }}>{pageError || socketError}</p>
+                    <button
+                        onClick={() => navigate(`/lobby/${sessionId}`)}
+                        style={{ padding: '0.625rem 1.5rem', background: 'linear-gradient(135deg,#D4AF37,#AA8C2C)', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', color: '#000' }}
+                    >
+                        Quay lại phòng chờ
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // ─── Render ───────────────────────────────────────────────
+    // Ưu tiên: dữ liệu real-time từ socket → dữ liệu HTTP ban đầu → fallback rỗng
+    const sessionPlateInfo = auctionData || initialPlateData;
+    // KHÔNG dùng sessionInfo.sessionName làm plateNumber — đó là tên phiên, không phải biển số
+    const plateNumber = sessionPlateInfo?.plateNumber || sessionPlateInfo?.licensePlate || '------';
+    const winnerData = winner || (status === 'ended' && auctionData?.winnerId
+        ? { userId: auctionData.winnerId, userName: auctionData.winnerName, finalPrice: auctionData.finalPrice }
+        : null);
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white font-sans">
-            {/* Header */}
-            <header className="bg-gray-800 border-b border-gray-700 py-4 px-6 flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                    <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
-                    <h1 className="text-xl font-bold text-white tracking-wide">PHÒNG ĐẤU GIÁ TRỰC TUYẾN</h1>
+        <div className="auction-room">
+            {/* ── Winner Overlay ── */}
+            {status === 'ended' && showWinner && (
+                <WinnerOverlay
+                    winner={winnerData}
+                    auctionData={auctionData}
+                    currentUserId={user?.id}
+                    onClose={() => setShowWinner(false)}
+                />
+            )}
+
+            {/* ── Header ── */}
+            <header className="auction-header">
+                <div className="auction-header-brand">
+                    <div className="live-dot" />
+                    <Gavel style={{ width: 18, height: 18, color: '#D4AF37' }} />
+                    <h1 className="auction-title">Phòng Đấu Giá Trực Tuyến</h1>
                 </div>
-                <div className="flex items-center gap-4">
-                    <span className="bg-gray-700 px-3 py-1 rounded text-sm text-gray-300">
-                        {user?.fullName || 'Khách'}
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {user?.role === 'admin' && status === 'pending' && (
+                        <button
+                            onClick={handleForceStart}
+                            style={{ padding: '0.25rem 0.75rem', background: '#EF4444', color: '#FFF', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: '0.8rem' }}
+                        >
+                            Bắt đầu ngay (Demo)
+                        </button>
+                    )}
+                    <div className="header-status-pill">
+                        <div className={`conn-indicator ${isConnected ? 'connected' : 'disconnected'}`} />
+                        {isConnected ? 'Kết nối ổn định' : 'Mất kết nối'}
+                        {!isConnected && reconnectCount > 0 && (
+                            <span style={{ color: '#6B7280', marginLeft: 4 }}>({reconnectCount})</span>
+                        )}
+                    </div>
+                    <div className="header-status-pill">
+                        <Eye style={{ width: 12, height: 12 }} />
+                        {viewers} online
+                    </div>
+                    <button
+                        onClick={() => setSoundEnabled(s => !s)}
+                        className="header-status-pill"
+                        title={soundEnabled ? 'Tắt âm thanh' : 'Bật âm thanh'}
+                        style={{ cursor: 'pointer', border: '1px solid rgba(212,175,55,0.15)', background: 'transparent' }}
+                    >
+                        {soundEnabled
+                            ? <Volume2 style={{ width: 13, height: 13, color: '#D4AF37' }} />
+                            : <VolumeX style={{ width: 13, height: 13, color: '#6B7280' }} />
+                        }
+                    </button>
+                    <span className="header-status-pill" style={{ color: '#D4AF37', fontWeight: 600 }}>
+                        {user?.fullName || user?.username || 'Khách'}
                     </span>
-                    <button onClick={() => navigate('/auction-history')} className="text-sm text-gray-400 hover:text-white transition">Thoát</button>
+                    <button onClick={() => navigate('/auction-history')} className="exit-btn">
+                        <LogOut style={{ width: 13, height: 13, display: 'inline', marginRight: 4 }} />
+                        Thoát
+                    </button>
                 </div>
             </header>
 
-            <div className="container mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-80px)]">
+            {/* Connection error banner */}
+            {!isConnected && socketError && (
+                <div className="connection-banner reconnecting">
+                    <WifiOff style={{ width: 14, height: 14 }} />
+                    {socketError}
+                </div>
+            )}
 
-                {/* Left: Main View (Image/Stream) - 8 columns */}
-                <div className="lg:col-span-8 flex flex-col gap-6">
-                    {/* Visual Area */}
-                    <div className="flex-1 bg-black rounded-2xl relative overflow-hidden border border-gray-700 shadow-2xl flex items-center justify-center group">
-                        {session?.plates?.[0]?.image ? (
-                            <img src={session.plates[0].image} className="w-full h-full object-contain" alt="Plate" />
+            {/* ── Main 3-column layout ── */}
+            <div className="auction-main">
+
+                {/* ── COL 1: Center — Plate visual + Info bar ── */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflow: 'hidden' }}>
+
+                    {/* Plate visual area */}
+                    <div className="plate-visual-card" style={{ flex: '0 0 auto', height: 220 }}>
+                        {sessionPlateInfo?.image ? (
+                            <img
+                                src={sessionPlateInfo.image}
+                                alt={plateNumber}
+                                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                            />
                         ) : (
-                            <div className="text-center">
-                                <div className="border-4 border-white inline-block px-8 py-4 rounded bg-blue-900 text-5xl font-mono font-bold tracking-widest mb-4">
-                                    {session?.sessionName || 'LOADING...'}
-                                </div>
-                                <p className="text-gray-400">Đang diễn ra trực tiếp</p>
+                            <div className="plate-display">
+                                <div className="plate-number-box">{plateNumber}</div>
+                                <p className="plate-subtitle">Đang diễn ra đấu giá trực tuyến</p>
                             </div>
                         )}
 
-                        {/* Overlay Stats */}
-                        <div className="absolute top-4 left-4 bg-black/60 backdrop-blur px-4 py-2 rounded-lg border border-gray-600">
-                            <span className="text-gray-300 text-xs uppercase block mb-1">Thời gian còn lại</span>
-                            <div className={`text-2xl font-mono font-bold ${timeLeft < 60 ? 'text-red-500' : 'text-white'}`}>
-                                {formatTime(timeLeft)}
-                            </div>
-                        </div>
-
-                        <div className="absolute top-4 right-4 bg-black/60 backdrop-blur px-4 py-2 rounded-lg border border-gray-600">
-                            <span className="text-gray-300 text-xs uppercase block mb-1">Giá hiện tại</span>
-                            <div className="text-2xl font-bold text-[#D4AF37]">
-                                {currentPrice.toLocaleString('vi-VN')}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Quick Info */}
-                    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
-                        <h2 className="text-lg font-bold text-white mb-2">{session?.sessionName}</h2>
-                        <div className="flex gap-8 text-sm text-gray-400">
-                            <div className="flex items-center gap-2">
-                                <Shield className="w-4 h-4" /> <span>Biển số sạch, pháp lý đảm bảo</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <User className="w-4 h-4" /> <span>Người tổ chức: VPA Auction</span>
-                            </div>
+                        {/* Stats overlay bottom */}
+                        <div className="stats-overlay">
+                            <PriceDisplay
+                                currentPrice={currentPrice}
+                                newBidFlash={newBidFlash}
+                                label="GIÁ HIỆN TẠI"
+                            />
+                            <CountdownTimer
+                                endTime={endTime}
+                                timeLeftSeconds={timeLeftSeconds}
+                                extensionCount={totalExtensions}
+                                maxExtensions={auctionData?.maxExtensions}
+                            />
                         </div>
                     </div>
 
-                    {/* Bid History - Show only on large screens */}
-                    <div className="hidden lg:block bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-                        <div className="p-4 border-b border-gray-700">
-                            <h3 className="text-gray-400 text-xs font-bold uppercase tracking-wider">Lịch sử đặt giá</h3>
+                    {/* Session info bar */}
+                    <div className="auction-info-bar">
+                        <div className="info-item">
+                            <Shield style={{ width: 15, height: 15 }} />
+                            <span>Biển số sạch, pháp lý đảm bảo</span>
                         </div>
-                        <div className="p-4 max-h-48 overflow-y-auto space-y-3">
-                            {bids.length === 0 ? (
-                                <div className="text-center py-10 text-gray-600 italic">Chưa có lượt trả giá nào</div>
-                            ) : (
-                                bids.slice(0, 5).map(bid => (
-                                    <div key={bid.id} className="flex justify-between items-center bg-gray-700/50 p-3 rounded-lg border-l-4 border-[#D4AF37]">
-                                        <div>
-                                            <div className="font-bold text-white text-sm">{bid.user || 'Ẩn danh'}</div>
-                                            <div className="text-xs text-gray-500">{new Date(bid.time).toLocaleTimeString()}</div>
-                                        </div>
-                                        <div className="font-bold text-[#D4AF37]">
-                                            {bid.amount.toLocaleString()}
-                                        </div>
-                                    </div>
-                                ))
-                            )}
+                        <div className="info-item">
+                            <Users style={{ width: 15, height: 15 }} />
+                            <span>{participants.length || viewers} người tham dự</span>
                         </div>
+                        {sessionInfo?.sessionName && (
+                            <div className="info-item">
+                                <Gavel style={{ width: 15, height: 15 }} />
+                                <span>{sessionInfo.sessionName}</span>
+                            </div>
+                        )}
+                        {(auctionData?.totalExtensions ?? 0) > 0 && (
+                            <div className="info-item" style={{ marginLeft: 'auto' }}>
+                                <span style={{ color: '#F59E0B', fontSize: '0.75rem', fontWeight: 600 }}>
+                                    ⚡ Đã gia hạn {auctionData.totalExtensions} lần
+                                </span>
+                            </div>
+                        )}
                     </div>
+
+                    {/* Bid History (full-height scrollable) */}
+                    <BidHistorySidebar bids={bids} currentUserId={user?.id} />
                 </div>
 
-                {/* Right Sidebar: Bidding Controls + Chat + Participants - 4 columns */}
-                <div className="lg:col-span-4 flex flex-col gap-4">
-                    {/* Bidding Controls */}
-                    <div className="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-xl">
-                        <div className="p-6 bg-gray-750 border-b border-gray-700">
-                            <div className="mb-4">
-                                <label className="block text-xs font-bold text-gray-400 uppercase mb-2">
-                                    Đặt giá của bạn (VNĐ)
-                                    <span className="text-xs font-normal lowercase ml-2 text-gray-500">(Phím tắt: B)</span>
-                                </label>
-                                <div className="relative">
-                                    <input
-                                        ref={bidInputRef}
-                                        type="number"
-                                        value={bidAmount}
-                                        onChange={e => setBidAmount(e.target.value)}
-                                        className="w-full bg-gray-900 border border-gray-600 text-white text-lg font-bold py-3 pl-10 pr-4 rounded-lg focus:outline-none focus:border-[#D4AF37] transition"
-                                        placeholder="Nhập giá..."
-                                    />
-                                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 w-5 h-5" />
+                {/* ── COL 2: Bid Controls + Chat ── */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflow: 'hidden' }}>
+
+                    {/* Bid Controls Card */}
+                    <div className="bid-controls-card">
+                        <div className="bid-controls-header">
+                            <Gavel style={{ width: 14, height: 14, color: '#D4AF37' }} />
+                            ĐẶT GIÁ
+                        </div>
+                        <div className="bid-controls-body">
+                            {/* Current leader */}
+                            {latestBid && (
+                                <div className="current-leader">
+                                    🏅 Đang dẫn:{' '}
+                                    <span className="current-leader-name">
+                                        {latestBid.userId === user?.id ? 'Bạn' : (latestBid.userName || 'Ẩn danh')}
+                                    </span>
+                                    {' '}— {(latestBid.bidAmount || 0).toLocaleString('vi-VN')} VNĐ
                                 </div>
-                                <div className="flex gap-2 mt-2">
-                                    {[1000000, 5000000, 10000000].map(step => (
+                            )}
+
+                            {/* Bid input */}
+                            <div className="bid-input-label">Giá của bạn (VNĐ)</div>
+                            <div className="bid-input-wrapper">
+                                <DollarSign className="bid-input-icon" style={{ width: 16, height: 16 }} />
+                                <input
+                                    ref={bidInputRef}
+                                    className="bid-input"
+                                    type="number"
+                                    value={bidInput}
+                                    onChange={e => setBidInput(e.target.value)}
+                                    onKeyDown={e => e.key === 'Enter' && handleSubmitBid()}
+                                    placeholder={minimumNextBid.toLocaleString('vi-VN')}
+                                    disabled={status !== 'active' || !canBid}
+                                />
+                            </div>
+                            <div className="min-bid-hint">
+                                Tối thiểu: <span>{minimumNextBid.toLocaleString('vi-VN')} VNĐ</span>
+                                {priceStep > 0 && (
+                                    <> · Bước giá: <span>{priceStep.toLocaleString('vi-VN')}</span></>
+                                )}
+                            </div>
+
+                            {/* Quick bid buttons */}
+                            {priceStep > 0 && (
+                                <div className="quick-bid-grid" style={{ marginTop: '0.75rem' }}>
+                                    {[1, 2, 5, 10].map(steps => (
                                         <button
-                                            key={step}
-                                            onClick={() => setBidAmount(currentPrice + step)}
-                                            className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition"
+                                            key={steps}
+                                            className="quick-bid-btn"
+                                            onClick={() => setQuickBid(steps)}
+                                            disabled={status !== 'active'}
                                         >
-                                            +{step.toLocaleString()}
+                                            +{(priceStep * steps).toLocaleString('vi-VN')}
                                         </button>
                                     ))}
                                 </div>
-                                <div className="text-xs text-gray-500 mt-2">
-                                    💡 Phím tắt: Space/1/2/5 để đặt giá nhanh
-                                </div>
-                            </div>
+                            )}
 
+                            {/* Submit */}
                             <button
-                                onClick={handleBid}
-                                disabled={status !== 'active'}
-                                className="w-full bg-gradient-to-r from-[#D4AF37] to-[#AA8C3C] hover:from-[#E5B83B] hover:to-[#BFA045] text-white font-black py-4 rounded-xl shadow-lg transform active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-lg uppercase tracking-wider"
+                                className={`submit-bid-btn ${isPlacingBid ? 'placing' : ''}`}
+                                onClick={handleSubmitBid}
+                                disabled={status !== 'active' || isPlacingBid || rateLimitRemaining > 0}
+                                style={{ marginTop: '0.875rem' }}
                             >
-                                <Gavel className="w-6 h-6" />
-                                {status === 'active' ? 'Xác nhận trả giá' : 'Phiên đấu giá kết thúc'}
+                                <Gavel style={{ width: 18, height: 18 }} />
+                                {isPlacingBid
+                                    ? 'Đang xử lý...'
+                                    : status !== 'active'
+                                        ? 'Phiên đã kết thúc'
+                                        : 'Xác nhận trả giá'
+                                }
                             </button>
+
+                            {/* Rate limit */}
+                            {rateLimitRemaining > 0 && (
+                                <div className="rate-limit-info">
+                                    ⏳ Chờ {rateLimitRemaining}s trước khi bid tiếp
+                                </div>
+                            )}
+
+                            {/* Bid error */}
+                            {bidError && (
+                                <div className="bid-error-msg">
+                                    <AlertCircle style={{ width: 14, height: 14, flexShrink: 0 }} />
+                                    {bidError}
+                                </div>
+                            )}
                         </div>
                     </div>
 
                     {/* Chat Box */}
-                    <ChatBox
-                        messages={messages}
-                        onSendMessage={sendMessage}
-                        typingUsers={typingUsers}
-                        onTyping={sendTyping}
-                        isConnected={roomSocketConnected}
-                    />
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                        <ChatBox
+                            messages={messages}
+                            onSendMessage={sendMessage}
+                            typingUsers={typingUsers}
+                            onTyping={sendTyping}
+                            isConnected={isConnected}
+                        />
+                    </div>
+                </div>
 
-                    {/* Participants List */}
+                {/* ── COL 3: Participants ── */}
+                <div className="auction-right-col" style={{ overflow: 'hidden' }}>
                     <ParticipantsList
                         participants={participants}
                         currentUserId={user?.id}
-                        winnerId={session?.winnerId}
-                        isExpanded={showParticipants}
-                        onToggle={() => setShowParticipants(!showParticipants)}
+                        winnerId={winnerData?.userId}
+                        isExpanded
+                        onToggle={refreshParticipants}
                     />
+                </div>
+            </div>
+
+            {/* ── Mobile Fixed Bid Bar ── */}
+            <div className="mobile-bid-bar">
+                <div className="mobile-bid-price">
+                    <div style={{ fontSize: '0.6875rem', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Giá hiện tại</div>
+                    <div className="mobile-current-price">{currentPrice.toLocaleString('vi-VN')} VNĐ</div>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                        className="quick-bid-btn"
+                        onClick={() => setQuickBid(1)}
+                        disabled={status !== 'active'}
+                        style={{ padding: '0.625rem 0.75rem', fontSize: '0.75rem' }}
+                    >
+                        +{priceStep.toLocaleString('vi-VN')}
+                    </button>
+                    <button
+                        className="mobile-submit-btn"
+                        onClick={handleSubmitBid}
+                        disabled={status !== 'active' || isPlacingBid || rateLimitRemaining > 0}
+                    >
+                        <Gavel style={{ width: 15, height: 15, display: 'inline', marginRight: 4 }} />
+                        Đặt giá
+                    </button>
                 </div>
             </div>
         </div>

@@ -19,24 +19,36 @@ export default function RoomLobby() {
     const [error, setError] = useState(null);
     const [timeUntilStart, setTimeUntilStart] = useState(null);
     const [canJoin, setCanJoin] = useState(false);
+    const [registration, setRegistration] = useState(null);
 
     // Fetch session details
-    useEffect(() => {
-        const fetchSession = async () => {
+        const fetchData = async () => {
             try {
-                const res = await axios.get(`/sessions/${sessionId}`);
-                if (res.data.success) {
-                    setSession(res.data.data);
-                    setLoading(false);
+                // Fetch session and my registrations parallel
+                const [sessionRes, myRegRes] = await Promise.all([
+                    axios.get(`/sessions/${sessionId}`),
+                    axios.get('/registrations/my')
+                ]);
+
+                if (sessionRes.data.success) {
+                    setSession(sessionRes.data.data);
                 }
+
+                if (myRegRes.data.success) {
+                    const myRegs = myRegRes.data.data || [];
+                    const currentReg = myRegs.find(r => r.sessionId?._id === sessionId || r.sessionId === sessionId);
+                    setRegistration(currentReg);
+                }
+                
+                setLoading(false);
             } catch (err) {
-                console.error('Error fetching session:', err);
+                console.error('Error fetching data:', err);
                 setError('Không thể tải thông tin phiên đấu giá');
                 setLoading(false);
             }
         };
 
-        fetchSession();
+        fetchData();
     }, [sessionId]);
 
     // Countdown timer
@@ -47,21 +59,23 @@ export default function RoomLobby() {
             const now = new Date();
             const start = new Date(session.startTime);
             const diff = start - now;
+            const isApproved = registration && ['approved', 'won_paid'].includes(registration.status);
 
             if (diff <= 0) {
                 setTimeUntilStart(0);
-                setCanJoin(true);
             } else {
                 setTimeUntilStart(diff);
-                setCanJoin(false);
             }
+            
+            // DEMO: Luôn cho vào phòng nếu đã được duyệt cọc, không cần chờ đếm ngược
+            setCanJoin(isApproved);
         };
 
         updateCountdown();
         const interval = setInterval(updateCountdown, 1000);
 
         return () => clearInterval(interval);
-    }, [session]);
+    }, [session, registration]);
 
     const formatCountdown = (ms) => {
         if (ms <= 0) return 'Đang diễn ra';
@@ -79,7 +93,7 @@ export default function RoomLobby() {
 
     const handleJoinRoom = () => {
         if (canJoin && session) {
-            navigate(`/auction/room/${sessionId}`);
+            navigate(`/live/${sessionId}`);
         }
     };
 
@@ -167,8 +181,30 @@ export default function RoomLobby() {
                                 <div className="countdown-time">
                                     {formatCountdown(timeUntilStart)}
                                 </div>
+                                
+                                {/* Trạng thái đăng ký */}
+                                <div className="registration-status-box" style={{ marginTop: '20px', padding: '15px', borderRadius: '8px', background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                                    <h3 style={{ fontSize: '14px', marginBottom: '8px', color: '#475569' }}>Tư cách tham gia:</h3>
+                                    {!registration ? (
+                                        <div style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <AlertCircle size={18} />
+                                            <span>Bạn chưa đăng ký tham gia</span>
+                                        </div>
+                                    ) : ['approved', 'won_paid'].includes(registration.status) ? (
+                                        <div style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '500' }}>
+                                            <CheckCircle size={18} />
+                                            <span>Đã đủ điều kiện tham gia</span>
+                                        </div>
+                                    ) : (
+                                        <div style={{ color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <AlertCircle size={18} />
+                                            <span>Đang chờ duyệt cọc / Chờ phê duyệt</span>
+                                        </div>
+                                    )}
+                                </div>
+
                                 {canJoin && (
-                                    <div className="ready-badge">
+                                    <div className="ready-badge" style={{ marginTop: '15px' }}>
                                         <CheckCircle size={20} />
                                         Sẵn sàng tham gia
                                     </div>
@@ -257,11 +293,15 @@ export default function RoomLobby() {
                             </>
                         )}
                     </button>
-                    {!canJoin && (
-                        <p className="join-hint">
+                    {!registration || !['approved', 'won_paid'].includes(registration.status) ? (
+                        <p className="join-hint error-hint" style={{ color: '#ef4444', marginTop: '10px' }}>
+                            Bạn cần đăng ký và được duyệt tiền cọc để vào phòng
+                        </p>
+                    ) : !canJoin ? (
+                        <p className="join-hint" style={{ marginTop: '10px' }}>
                             Nút sẽ được kích hoạt khi phiên đấu giá bắt đầu
                         </p>
-                    )}
+                    ) : null}
                 </div>
             </div>
         </div>

@@ -82,12 +82,18 @@ export async function seedPlates(totalItems = 1000, clean = false) {
             let plateNumber;
             let attempts = 0;
             do {
+                if (i === 0) {
+                    province = 'Thành phố Hà Nội';
+                    plateType = 'Ngũ quý';
+                    plateNumber = '29A.55555';
+                    break;
+                }
                 plateNumber = generateCarPlate(province, plateType);
                 attempts++;
                 if (attempts > 100) break;
             } while (generatedCarNumbers.has(plateNumber));
 
-            if (attempts > 100) continue;
+            if (attempts > 100 && i !== 0) continue;
 
             generatedCarNumbers.add(plateNumber);
 

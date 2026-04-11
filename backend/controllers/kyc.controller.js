@@ -204,7 +204,8 @@ export const getUserKYC = async (req, res) => {
 export const checkParticipation = async (req, res) => {
     try {
         const userId = req.user.userId;
-        const result = await kycService.canParticipate(userId);
+        const sessionId = req.query.sessionId; // Optional sessionId for bypass check
+        const result = await kycService.canParticipate(userId, sessionId);
 
         res.status(200).json({
             success: true,

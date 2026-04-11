@@ -30,6 +30,22 @@ const carPlateSchema = new mongoose.Schema(
             required: [true, 'Starting price is required'],
             min: [0, 'Starting price must be non-negative'],
         },
+        priceStep: {
+            type: Number,
+            default: 1000000, // 1M VND per step
+            min: [100000, 'Price step must be at least 100K VND'],
+        },
+        images: [{
+            type: String, // Array of image URLs
+        }],
+        detailedDescription: {
+            type: String,
+            trim: true,
+        },
+        features: {
+            type: [String], // ['Số đẹp', 'Dễ nhớ', 'Phong thủy tốt']
+            default: [],
+        },
         status: {
             type: String,
             enum: ['available', 'in_auction', 'sold'],

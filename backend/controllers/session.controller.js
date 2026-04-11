@@ -10,6 +10,7 @@ import {
     buildSessionFilter
 } from '../utils/pagination.utils.js';
 
+
 /**
  * @route   GET /api/sessions
  * @desc    Get all sessions with pagination and filtering
@@ -236,11 +237,12 @@ export const finalizeAuction = async (req, res) => {
         for (const plate of plates) {
             // Get highest bid
             const highestBid = await Bid.findOne({ sessionPlateId: plate._id })
-                .sort({ amount: -1 });
+                .sort({ bidAmount: -1 });
 
             if (highestBid) {
                 plate.winnerId = highestBid.userId;
-                plate.currentPrice = highestBid.amount;
+                if (highestBid.userName) plate.winnerName = highestBid.userName;
+                plate.currentPrice = highestBid.bidAmount;
                 plate.status = 'sold'; // or 'ended'
                 await plate.save();
 
@@ -255,7 +257,7 @@ export const finalizeAuction = async (req, res) => {
             }
         }
 
-        session.status = 'ended';
+        session.status = 'completed';
         await session.save();
 
         res.status(200).json({
@@ -265,6 +267,111 @@ export const finalizeAuction = async (req, res) => {
 
     } catch (error) {
         console.error('Finalize error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * @route   POST /api/sessions/plates/:plateId/start
+ * @desc    Admin: Bắt đầu đấu giá 1 biển ngay lập tức
+ * @body    { durationMinutes: 60 }
+ * @access  Private/Admin
+ */
+export const startAuctionPlate = async (req, res) => {
+    try {
+        const { plateId } = req.params;
+        const { durationMinutes = 60 } = req.body;
+
+        const sessionPlate = await SessionPlate.findById(plateId);
+        if (!sessionPlate) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy biển đấu giá' });
+        }
+        if (sessionPlate.status === 'bidding') {
+            return res.status(400).json({ success: false, message: 'Biển đang trong phiên đấu giá' });
+        }
+        if (['sold', 'unsold'].includes(sessionPlate.status)) {
+            return res.status(400).json({ success: false, message: 'Phiên đấu giá đã kết thúc' });
+        }
+
+        const now = new Date();
+        const endTime = new Date(now.getTime() + durationMinutes * 60 * 1000);
+
+        sessionPlate.status = 'bidding';
+        sessionPlate.auctionStartTime = now;
+        sessionPlate.auctionEndTime = endTime;
+        sessionPlate.totalExtensions = 0;
+        await sessionPlate.save();
+
+        // Broadcast trạng thái mới qua Socket.io
+        try {
+            const { getIO } = await import('../socket/socket.handler.js');
+            const io = getIO();
+            io.to(`auction:${plateId}`).emit('auction_state', {
+                sessionPlate: {
+                    currentPrice: sessionPlate.currentPrice,
+                    status: 'bidding',
+                    auctionStartTime: now,
+                    auctionEndTime: endTime,
+                    timeLeft: durationMinutes * 60 * 1000,
+                    totalExtensions: 0,
+                }
+            });
+        } catch (e) { /* socket chưa ready, bỏ qua */ }
+
+        console.log(`🟢 Admin manually started: ${sessionPlate.plateNumber} → ends ${endTime.toISOString()}`);
+
+        res.status(200).json({
+            success: true,
+            message: `Đã bắt đầu đấu giá ${sessionPlate.plateNumber} trong ${durationMinutes} phút`,
+            data: {
+                plateNumber: sessionPlate.plateNumber,
+                auctionStartTime: now,
+                auctionEndTime: endTime,
+                durationMinutes,
+            }
+        });
+
+    } catch (error) {
+        console.error('startAuctionPlate error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * @route   POST /api/sessions/plates/:plateId/stop
+ * @desc    Admin: Dừng phiên đấu giá sớm, xác định người thắng
+ * @access  Private/Admin
+ */
+export const stopAuctionPlate = async (req, res) => {
+    try {
+        const { plateId } = req.params;
+
+        const sessionPlate = await SessionPlate.findById(plateId);
+        if (!sessionPlate) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy biển đấu giá' });
+        }
+        if (sessionPlate.status !== 'bidding') {
+            return res.status(400).json({ success: false, message: 'Biển không đang trong phiên đấu giá' });
+        }
+
+        // Đặt endTime = now để cron sẽ pick up và xác định winner
+        sessionPlate.auctionEndTime = new Date();
+        await sessionPlate.save();
+
+        // Xác định winner ngay lập tức
+        const biddingService = (await import('../services/bidding.service.js')).default;
+        const result = await biddingService.determineWinner(plateId);
+
+        console.log(`🔴 Admin force-stopped: ${sessionPlate.plateNumber}`);
+
+        res.status(200).json({
+            success: true,
+            message: `Đã dừng đấu giá ${sessionPlate.plateNumber}`,
+            data: result
+        });
+
+    } catch (error) {
+        console.error('stopAuctionPlate error:', error);
         res.status(500).json({ success: false, message: error.message });
     }
 };

@@ -18,143 +18,160 @@ class BiddingService {
      * @param {String} ipAddress
      */
     async placeBid(sessionPlateId, userId, userName, bidAmount, ipAddress = null) {
-        const session = await mongoose.startSession();
-        session.startTransaction();
+        const mongoSession = await mongoose.startSession();
+        mongoSession.startTransaction();
 
         try {
-            // 1. Get SessionPlate with lock (for update)
-            const sessionPlate = await SessionPlate.findById(sessionPlateId)
-                .session(session)
-                .populate('sessionId');
-
-            if (!sessionPlate) {
-                throw new Error('Auction not found');
-            }
-
-            // 2. Validate auction status
-            if (sessionPlate.status !== 'bidding') {
-                throw new Error(`Auction is not active. Current status: ${sessionPlate.status}`);
-            }
-
-            // 3. Check if auction time has ended
             const now = new Date();
+
+            // ─────────────────────────────────────────────────────────────
+            // BƯỚC 1: Đọc SessionPlate để validate trước khi lock
+            // ─────────────────────────────────────────────────────────────
+            const sessionPlate = await SessionPlate.findById(sessionPlateId)
+                .session(mongoSession)
+                .populate('sessionId')
+                .lean(); // lean() cho read nhanh hơn
+
+            if (!sessionPlate) throw new Error('Không tìm thấy phiên đấu giá');
+
+            // Validate trạng thái
+            if (sessionPlate.status !== 'bidding') {
+                throw new Error(`Phiên đấu giá không đang hoạt động (trạng thái: ${sessionPlate.status})`);
+            }
             if (now > sessionPlate.auctionEndTime) {
-                throw new Error('Auction has ended');
+                throw new Error('Phiên đấu giá đã kết thúc');
             }
 
-            // 4. Validate user is registered and approved
+            // ─────────────────────────────────────────────────────────────
+            // BƯỚC 2: Kiểm tra đăng ký & quyền tham gia
+            // ─────────────────────────────────────────────────────────────
             const registration = await Registration.findOne({
                 sessionId: sessionPlate.sessionId._id,
                 userId,
-                depositStatus: 'paid',
-                status: 'approved'
-            }).session(session);
+                status: { $in: ['approved', 'won_paid'] }
+            }).session(mongoSession).lean();
 
             if (!registration) {
-                throw new Error('You are not registered for this auction or deposit not paid');
+                throw new Error('Bạn chưa đăng ký hoặc chưa nộp cọc cho phiên đấu giá này');
             }
 
-            // 5. Check if user is the current winner (can't bid on own bid)
+            // Không được bid khi đang là người thắng hiện tại
             if (sessionPlate.winnerId && sessionPlate.winnerId.toString() === userId.toString()) {
-                throw new Error('You are already the highest bidder');
+                throw new Error('Bạn đang là người trả giá cao nhất, không thể bid tiếp');
             }
 
-            // 6. Validate bid amount
+            // ─────────────────────────────────────────────────────────────
+            // BƯỚC 3: Validate số tiền bid
+            // ─────────────────────────────────────────────────────────────
             const minimumBid = sessionPlate.currentPrice + sessionPlate.priceStep;
             if (bidAmount < minimumBid) {
                 throw new Error(
-                    `Bid must be at least ${minimumBid.toLocaleString('vi-VN')} VND. ` +
-                    `Current price: ${sessionPlate.currentPrice.toLocaleString('vi-VN')} VND, ` +
-                    `Step: ${sessionPlate.priceStep.toLocaleString('vi-VN')} VND`
+                    `Giá đặt phải ít nhất ${minimumBid.toLocaleString('vi-VN')} VNĐ ` +
+                    `(Giá hiện tại: ${sessionPlate.currentPrice.toLocaleString('vi-VN')} + ` +
+                    `Bước giá: ${sessionPlate.priceStep.toLocaleString('vi-VN')})`
                 );
             }
 
-            // 7. Validate bid is multiple of price step
-            const priceAboveStart = bidAmount - sessionPlate.startingPrice;
-            if (priceAboveStart % sessionPlate.priceStep !== 0) {
-                throw new Error(
-                    `Bid must be in increments of ${sessionPlate.priceStep.toLocaleString('vi-VN')} VND`
-                );
-            }
-
-            // 8. Check user wallet balance
+            // ─────────────────────────────────────────────────────────────
+            // BƯỚC 4: Kiểm tra số dư ví
+            // ─────────────────────────────────────────────────────────────
             const balance = await walletService.getBalance(userId);
             const requiredAmount = bidAmount - registration.depositAmount;
             if (balance.available < requiredAmount) {
                 throw new Error(
-                    `Insufficient wallet balance. ` +
-                    `Available: ${balance.available.toLocaleString('vi-VN')} VND, ` +
-                    `Required: ${requiredAmount.toLocaleString('vi-VN')} VND`
+                    `Số dư ví không đủ. Khả dụng: ${balance.available.toLocaleString('vi-VN')} VNĐ, ` +
+                    `Cần thêm: ${requiredAmount.toLocaleString('vi-VN')} VNĐ`
                 );
             }
 
-            // 9. Check KYC and bidding permissions
-            const canParticipate = await kycService.canParticipate(userId);
+            // ─────────────────────────────────────────────────────────────
+            // BƯỚC 5: Kiểm tra KYC
+            // ─────────────────────────────────────────────────────────────
+            const canParticipate = await kycService.canParticipate(userId, sessionPlate.sessionId._id);
             if (!canParticipate.canParticipate) {
                 throw new Error(canParticipate.reason);
             }
 
-            // 10. Update previous winning bid
+            // ─────────────────────────────────────────────────────────────
+            // BƯỚC 6: ATOMIC UPDATE — Chống Race Condition
+            //
+            // findOneAndUpdate với điều kiện:
+            //   - currentPrice < bidAmount → đảm bảo không có bid cao hơn đã được chèn
+            //   - status === 'bidding'
+            //   - auctionEndTime > now
+            //
+            // Nếu hai request cùng đến đồng thời, chỉ 1 cái thỏa điều kiện
+            // vì sau khi cái đầu update currentPrice, cái sau sẽ thất bại
+            // do `currentPrice` sẽ >= bidAmount.
+            // ─────────────────────────────────────────────────────────────
+            const timeLeft = new Date(sessionPlate.auctionEndTime) - now;
+            const extensionThresholdMs = sessionPlate.bidExtensionSeconds * 1000;
+            const shouldExtendTime =
+                timeLeft <= extensionThresholdMs &&
+                sessionPlate.totalExtensions < sessionPlate.maxExtensions;
+
+            const newEndTime = shouldExtendTime
+                ? new Date(new Date(sessionPlate.auctionEndTime).getTime() + extensionThresholdMs)
+                : sessionPlate.auctionEndTime;
+
+            const updateOps = {
+                $set: {
+                    currentPrice: bidAmount,
+                    lastBidTime: now,
+                    winnerId: userId,
+                    winnerName: userName,
+                },
+            };
+
+            if (shouldExtendTime) {
+                updateOps.$set.auctionEndTime = newEndTime;
+                updateOps.$inc = { totalExtensions: 1 };
+            }
+
+            const updatedSessionPlate = await SessionPlate.findOneAndUpdate(
+                {
+                    _id: sessionPlateId,
+                    status: 'bidding',
+                    currentPrice: { $lt: bidAmount }, // ← Điều kiện atomic chống race condition
+                    auctionEndTime: { $gt: now },
+                },
+                updateOps,
+                { new: true, session: mongoSession }
+            );
+
+            // Nếu null → bid đã bị vượt qua bởi người khác trong cùng millisecond
+            if (!updatedSessionPlate) {
+                throw new Error(
+                    'Giá của bạn đã bị vượt qua. Vui lòng kiểm tra giá mới và thử lại'
+                );
+            }
+
+            const previousPrice = sessionPlate.currentPrice;
+            const timeExtended = shouldExtendTime;
+
+            // ─────────────────────────────────────────────────────────────
+            // BƯỚC 7: Reset isWinning của các bid cũ & Tạo bid mới
+            // ─────────────────────────────────────────────────────────────
             await Bid.updateMany(
                 { sessionPlateId, isWinning: true },
-                { $set: { isWinning: false } }
-            ).session(session);
+                { $set: { isWinning: false } },
+                { session: mongoSession }
+            );
 
-            // 11. Create new bid
             const newBid = await Bid.create([{
                 sessionPlateId,
                 userId,
                 userName,
-                plateNumber: sessionPlate.plateNumber,
+                plateNumber: updatedSessionPlate.plateNumber,
                 bidAmount,
                 isWinning: true,
-                bidTime: now
-            }], { session });
+                bidTime: now,
+            }], { session: mongoSession });
 
-            // 12. Update SessionPlate
-            const previousPrice = sessionPlate.currentPrice;
-            sessionPlate.currentPrice = bidAmount;
-            sessionPlate.lastBidTime = now;
-
-            // 13. Check for time extension
-            let timeExtended = false;
-            let newEndTime = sessionPlate.auctionEndTime;
-            const timeLeft = sessionPlate.auctionEndTime - now;
-            const extensionThreshold = sessionPlate.bidExtensionSeconds * 1000;
-
-            if (timeLeft <= extensionThreshold &&
-                sessionPlate.totalExtensions < sessionPlate.maxExtensions) {
-
-                const extensionMs = sessionPlate.bidExtensionSeconds * 1000;
-                newEndTime = new Date(sessionPlate.auctionEndTime.getTime() + extensionMs);
-                sessionPlate.auctionEndTime = newEndTime;
-                sessionPlate.totalExtensions += 1;
-                timeExtended = true;
-
-                // Log time extension
-                await AuctionLog.create([{
-                    sessionPlateId,
-                    eventType: 'time_extended',
-                    userId,
-                    userName,
-                    metadata: {
-                        newEndTime: newEndTime,
-                        extensionSeconds: sessionPlate.bidExtensionSeconds,
-                        totalExtensions: sessionPlate.totalExtensions,
-                        triggeredBy: userName,
-                        bidAmount: bidAmount
-                    },
-                    ipAddress,
-                    success: true
-                }], { session });
-
-                console.log(`⏰ Time extended for ${sessionPlate.plateNumber}: +${sessionPlate.bidExtensionSeconds}s`);
-            }
-
-            await sessionPlate.save({ session });
-
-            // 14. Log bid placement
-            await AuctionLog.create([{
+            // ─────────────────────────────────────────────────────────────
+            // BƯỚC 8: Ghi log
+            // ─────────────────────────────────────────────────────────────
+            const logEntries = [{
                 sessionPlateId,
                 eventType: 'bid_placed',
                 userId,
@@ -164,28 +181,51 @@ class BiddingService {
                     previousPrice,
                     priceIncrease: bidAmount - previousPrice,
                     isWinning: true,
-                    timeExtended
+                    timeExtended,
                 },
                 ipAddress,
-                success: true
-            }], { session });
+                success: true,
+            }];
 
-            await session.commitTransaction();
+            if (timeExtended) {
+                logEntries.push({
+                    sessionPlateId,
+                    eventType: 'time_extended',
+                    userId,
+                    userName,
+                    metadata: {
+                        newEndTime,
+                        extensionSeconds: updatedSessionPlate.bidExtensionSeconds,
+                        totalExtensions: updatedSessionPlate.totalExtensions,
+                        triggeredBy: userName,
+                        bidAmount,
+                    },
+                    ipAddress,
+                    success: true,
+                });
+                console.log(`⏰ Time extended for ${updatedSessionPlate.plateNumber}: +${updatedSessionPlate.bidExtensionSeconds}s`);
+            }
+
+            await AuctionLog.create(logEntries, { session: mongoSession });
+
+            await mongoSession.commitTransaction();
 
             console.log(
-                `✅ Bid placed: ${userName} bid ${bidAmount.toLocaleString('vi-VN')} VND ` +
-                `on ${sessionPlate.plateNumber}`
+                `✅ Bid placed: ${userName} → ${bidAmount.toLocaleString('vi-VN')} VNĐ ` +
+                `on ${updatedSessionPlate.plateNumber} (prev: ${previousPrice.toLocaleString('vi-VN')})`
             );
 
-            // 15. Emit WebSocket events (after transaction commit)
+            // ─────────────────────────────────────────────────────────────
+            // BƯỚC 9: Emit WebSocket events (SAU khi commit transaction)
+            // ─────────────────────────────────────────────────────────────
             this.emitBidEvents(sessionPlateId, {
                 bid: newBid[0],
-                sessionPlate,
+                sessionPlate: updatedSessionPlate,
                 timeExtended,
-                newEndTime,
+                newEndTime: updatedSessionPlate.auctionEndTime,
                 userName,
                 bidAmount,
-                now
+                now,
             });
 
             return {
@@ -193,39 +233,32 @@ class BiddingService {
                 bid: newBid[0],
                 currentPrice: bidAmount,
                 timeExtended,
-                newEndTime: sessionPlate.auctionEndTime,
-                totalExtensions: sessionPlate.totalExtensions,
+                newEndTime: updatedSessionPlate.auctionEndTime,
+                totalExtensions: updatedSessionPlate.totalExtensions,
                 message: timeExtended
-                    ? `Bid placed successfully! Time extended by ${sessionPlate.bidExtensionSeconds} seconds.`
-                    : 'Bid placed successfully!'
+                    ? `Đặt giá thành công! Thời gian được gia hạn thêm ${updatedSessionPlate.bidExtensionSeconds} giây.`
+                    : 'Đặt giá thành công!',
             };
 
         } catch (error) {
-            await session.abortTransaction();
+            await mongoSession.abortTransaction();
 
-            // Log failed bid attempt
-            try {
-                await AuctionLog.create({
-                    sessionPlateId,
-                    eventType: 'bid_placed',
-                    userId,
-                    userName,
-                    metadata: {
-                        bidAmount,
-                        attemptedBid: true
-                    },
-                    ipAddress,
-                    success: false,
-                    errorMessage: error.message
-                });
-            } catch (logError) {
-                console.error('Failed to log bid error:', logError);
-            }
+            // Ghi log thất bại (best-effort, không throw nếu lỗi)
+            AuctionLog.create({
+                sessionPlateId,
+                eventType: 'bid_placed',
+                userId,
+                userName,
+                metadata: { bidAmount, attemptedBid: true },
+                ipAddress,
+                success: false,
+                errorMessage: error.message,
+            }).catch(e => console.error('Không ghi được log bid lỗi:', e));
 
             console.error('❌ Place bid error:', error.message);
             throw error;
         } finally {
-            session.endSession();
+            mongoSession.endSession();
         }
     }
 

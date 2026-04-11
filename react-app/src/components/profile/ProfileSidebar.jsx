@@ -1,9 +1,12 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { User, ShoppingCart, Gavel } from 'lucide-react';
+import { User, ShoppingCart, Gavel, Bell, Wallet } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import KYCStatusCard from '@/components/profile/KYCStatusCard';
 
 export default function ProfileSidebar() {
     const location = useLocation();
+    const { user } = useAuth();
 
     // Determine active path more loosely to handle sub-routes if any
     const isActive = (path) => location.pathname.startsWith(path);
@@ -15,6 +18,20 @@ export default function ProfileSidebar() {
             label: 'Thông tin tài khoản',
             subtitle: 'Xem và chỉnh sửa hồ sơ',
             path: '/profile'
+        },
+        {
+            id: 'wallet',
+            icon: Wallet,
+            label: 'Ví của tôi',
+            subtitle: 'Quản lý số dư và giao dịch',
+            path: '/wallet'
+        },
+        {
+            id: 'notifications',
+            icon: Bell,
+            label: 'Thông báo',
+            subtitle: 'Xem thông báo hệ thống',
+            path: '/notifications'
         },
         {
             id: 'cart',
@@ -63,11 +80,24 @@ export default function ProfileSidebar() {
                 })}
             </nav>
 
+            {/* KYC Status (compact) */}
+            {user && (
+                <div className="mt-4">
+                    <KYCStatusCard
+                        kycStatus={user.kycStatus || user.verificationStatus || 'none'}
+                        rejectionReason={user.kycRejectionReason}
+                        compact
+                    />
+                </div>
+            )}
+
             {/* Decorative bottom element */}
-            <div className="mt-6 pt-6 border-t border-gray-100 text-center">
+            <div className="mt-4 pt-4 border-t border-gray-100 text-center">
                 <p className="text-xs text-gray-400 font-medium">© 2025 NPA Auction</p>
                 <div className="mt-2 h-1 w-12 mx-auto bg-gradient-to-r from-transparent via-[#AA8C3C]/30 to-transparent rounded-full" />
             </div>
         </div>
     );
 }
+
+

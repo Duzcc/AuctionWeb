@@ -15,6 +15,12 @@ export const getBalance = async (req, res) => {
         });
     } catch (error) {
         console.error('Get balance error:', error);
+        if (error.message === 'User not found') {
+            return res.status(401).json({
+                success: false,
+                message: 'Phiên đăng nhập không hợp lệ hoặc người dùng không tồn tại'
+            });
+        }
         res.status(500).json({
             success: false,
             message: error.message || 'Failed to get wallet balance'
@@ -37,6 +43,12 @@ export const getWalletSummary = async (req, res) => {
         });
     } catch (error) {
         console.error('Get wallet summary error:', error);
+        if (error.message === 'User not found') {
+            return res.status(401).json({
+                success: false,
+                message: 'Phiên đăng nhập không hợp lệ hoặc người dùng không tồn tại'
+            });
+        }
         res.status(500).json({
             success: false,
             message: error.message || 'Failed to get wallet summary'

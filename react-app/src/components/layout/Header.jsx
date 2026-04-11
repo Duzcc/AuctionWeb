@@ -2,7 +2,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCart } from '@/contexts/CartContext';
-import { Phone, Bell, ChevronDown } from 'lucide-react';
+import { Phone, Bell, ChevronDown, Wallet } from 'lucide-react';
+import axios from '@/services/axiosInstance';
 
 export default function Header() {
     const location = useLocation();
@@ -11,6 +12,8 @@ export default function Header() {
     const [userMenuOpen, setUserMenuOpen] = useState(false);
     const [isScrolled, setIsScrolled] = useState(false);
     const [currentDate, setCurrentDate] = useState('');
+    const [walletBalance, setWalletBalance] = useState(null);
+    const [unreadCount, setUnreadCount] = useState(0);
 
     // Get current page
     const getCurrentPage = () => {
@@ -42,6 +45,20 @@ export default function Header() {
     useEffect(() => {
         setUserMenuOpen(false);
     }, [location]);
+
+    // Fetch wallet balance + unread notifications khi đã login
+    useEffect(() => {
+        if (!isAuthenticated) { setWalletBalance(null); setUnreadCount(0); return; }
+        // Wallet balance
+        axios.get('/wallet/balance').then(res => {
+            const bal = res.data?.data?.walletBalance ?? res.data?.walletBalance;
+            if (bal != null) setWalletBalance(bal);
+        }).catch(() => { });
+        // Unread notifications (optional endpoint, ignore if missing)
+        axios.get('/notifications/unread-count').then(res => {
+            setUnreadCount(res.data?.count ?? 0);
+        }).catch(() => { });
+    }, [isAuthenticated, location.pathname]);
 
     const handleLogout = () => {
         logout();
@@ -124,15 +141,36 @@ export default function Header() {
                         <div className="flex items-center gap-4">
                             {/* Icons Group */}
                             {isAuthenticated && (
-                                <div className="flex items-center gap-5 mr-4 border-r border-gray-200 pr-4">
-                                    {/* Notification */}
-                                    <button className="relative group">
+                                <div className="flex items-center gap-4 mr-4 border-r border-gray-200 pr-4">
+                                    {/* Wallet balance chip */}
+                                    {walletBalance != null && (
+                                        <Link
+                                            to="/wallet"
+                                            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-[#AA8C3C]/10 hover:bg-[#AA8C3C]/20 rounded-full transition-colors"
+                                            title="Ví của tôi"
+                                        >
+                                            <Wallet className="w-3.5 h-3.5 text-[#AA8C3C]" />
+                                            <span className="text-xs font-bold text-[#AA8C3C]">
+                                                {walletBalance >= 1_000_000
+                                                    ? `${(walletBalance / 1_000_000).toFixed(1)}M`
+                                                    : `${(walletBalance / 1000).toFixed(0)}K`
+                                                }
+                                            </span>
+                                        </Link>
+                                    )}
+
+                                    {/* Notification Bell */}
+                                    <Link to="/notifications" className="relative" title="Thông báo">
                                         <Bell className="w-6 h-6 text-gray-700 hover:text-[#AA8C3C] transition-colors" />
-                                        <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white transform translate-x-1/2 -translate-y-1/2 hidden group-hover:block"></span>
-                                    </button>
+                                        {unreadCount > 0 && (
+                                            <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center border border-white px-0.5">
+                                                {unreadCount > 9 ? '9+' : unreadCount}
+                                            </span>
+                                        )}
+                                    </Link>
 
                                     {/* Cart */}
-                                    <Link to="/cart" className="relative">
+                                    <Link to="/cart" className="relative" title="Giỏ hàng">
                                         <svg
                                             className="w-6 h-6 text-gray-700 hover:text-[#AA8C3C] transition-colors"
                                             fill="none"
@@ -212,6 +250,34 @@ export default function Header() {
                                                         </Link>
                                                     </li>
                                                 )}
+                                                <li>
+                                                    <Link
+                                                        to="/wallet"
+                                                        className="flex items-center justify-between px-5 py-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-[#AA8C3C] transition-colors"
+                                                        onClick={() => setUserMenuOpen(false)}
+                                                    >
+                                                        <span>💰 Ví của tôi</span>
+                                                        {walletBalance != null && (
+                                                            <span className="text-xs font-bold bg-[#AA8C3C]/10 text-[#AA8C3C] px-2 py-0.5 rounded-full">
+                                                                {new Intl.NumberFormat('vi-VN').format(walletBalance)}đ
+                                                            </span>
+                                                        )}
+                                                    </Link>
+                                                </li>
+                                                <li>
+                                                    <Link
+                                                        to="/notifications"
+                                                        className="flex items-center justify-between px-5 py-3 text-sm text-gray-700 hover:bg-gray-50 hover:text-[#AA8C3C] transition-colors"
+                                                        onClick={() => setUserMenuOpen(false)}
+                                                    >
+                                                        <span>🔔 Thông báo</span>
+                                                        {unreadCount > 0 && (
+                                                            <span className="text-xs font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
+                                                                {unreadCount}
+                                                            </span>
+                                                        )}
+                                                    </Link>
+                                                </li>
                                                 <li>
                                                     <Link
                                                         to="/auction-history"

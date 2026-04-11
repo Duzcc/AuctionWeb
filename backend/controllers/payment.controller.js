@@ -14,21 +14,25 @@ export const createDepositPayment = async (req, res, next) => {
         const { registrationId, amount, feeAmount, method, transactionCode } = req.body;
         const userId = req.user.id;
 
-        const registration = await Registration.findById(registrationId);
-        if (!registration) {
-            throw new AppError('Registration not found', 404);
-        }
-
-        if (registration.userId.toString() !== userId.toString()) {
-            throw new AppError('Unauthorized', 403);
+        let registration = null;
+        if (registrationId) {
+            registration = await Registration.findById(registrationId);
+            if (!registration && req.body.type !== 'auction_remaining') {
+                throw new AppError('Registration not found', 404);
+            }
+            if (registration && registration.userId.toString() !== userId.toString()) {
+                throw new AppError('Unauthorized', 403);
+            }
+        } else if (req.body.type !== 'auction_remaining') {
+            throw new AppError('Registration ID is required', 400);
         }
 
         const totalAmount = Number(amount || 0) + Number(feeAmount || 0);
 
         const payment = await Payment.create({
             user: userId,
-            registration: registrationId,
-            type: 'DEPOSIT',
+            registration: registrationId || undefined,
+            type: req.body.type || 'DEPOSIT',
             amount: Number(amount),
             feeAmount: Number(feeAmount),
             totalAmount: totalAmount,

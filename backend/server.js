@@ -17,6 +17,7 @@ import bidRoutes from './routes/bid.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import walletRoutes from './routes/wallet.routes.js';
 import kycRoutes from './routes/kyc.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 import { initializeSocket } from './socket/socket.handler.js';
 import auctionCron from './jobs/auctionCron.js';
 
@@ -31,6 +32,8 @@ const httpServer = createServer(app);
 const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:5174',
+    'http://localhost:5175',
+    'http://localhost:5176', // extra buffer in case port shifts again
     process.env.FRONTEND_URL
 ].filter(Boolean); // Remove undefined values
 
@@ -82,6 +85,7 @@ app.use('/api/bids', bidRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/kyc', kycRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // 404 handler
 app.use((req, res) => {

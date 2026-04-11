@@ -95,18 +95,10 @@ export const autoCreateSessionForPlate = async (plateId, plateType, options = {}
             throw new Error(`Plate ${plate.plateNumber || plate.name} is already sold`);
         }
 
-        // 4. Find or create default room
-        let room = await Room.findOne({ roomName: 'Public Auction Room', isActive: true });
-        if (!room) {
-            console.log('📍 Creating default auction room...');
-            room = await Room.create({
-                roomName: 'Public Auction Room',
-                location: 'Online',
-                capacity: 1000,
-                description: 'Default room for auto-created sessions',
-                isActive: true
-            });
-        }
+        // 4. Find or create appropriate room based on plate type
+        let room = await findOrCreateRoomForType(plateType);
+
+        console.log(`📍 Selected room: ${room.roomName} (${room.roomType})`);
 
         // 5. Calculate session timing
         const now = new Date();
@@ -179,6 +171,115 @@ export const autoCreateSessionForPlate = async (plateId, plateType, options = {}
 export const findOrCreateSessionForPlate = async (plateId, plateType, options = {}) => {
     return await autoCreateSessionForPlate(plateId, plateType, options);
 };
+
+/**
+ * Find or create appropriate room for a given plate type
+ * @param {String} plateType - 'CarPlate', 'MotorbikePlate', or 'Asset'
+ * @returns {Object} Room document
+ */
+async function findOrCreateRoomForType(plateType) {
+    // 1. Try to find specialized room of matching type (with load balancing)
+    let room = await Room.findOne({
+        roomType: plateType,
+        isActive: true
+    }).sort({ 'statistics.totalSessions': 1 }); // Load balancing: choose room with fewest sessions
+
+    if (room) {
+        console.log(`✅ Found specialized ${plateType} room: ${room.roomName}`);
+        return room;
+    }
+
+    // 2. Fallback to general room
+    room = await Room.findOne({
+        roomType: 'General',
+        isActive: true
+    });
+
+    if (room) {
+        console.log(`ℹ️  Using general room: ${room.roomName}`);
+        return room;
+    }
+
+    // 3. Create default specialized room if none exists
+    console.log(`🆕 Creating default ${plateType} room...`);
+    return await createDefaultRoomForType(plateType);
+}
+
+/**
+ * Create default room configuration for a specific type
+ * @param {String} roomType - 'CarPlate', 'MotorbikePlate', or 'Asset'
+ * @returns {Object} Created room document
+ */
+async function createDefaultRoomForType(roomType) {
+    const roomConfigs = {
+        'CarPlate': {
+            roomName: 'Phòng Đấu Giá Biển Số Xe Hơi',
+            roomType: 'CarPlate',
+            specialization: 'Biển số xe hơi cao cấp',
+            location: 'Online',
+            capacity: 500,
+            description: 'Phòng chuyên đấu giá biển số xe hơi ngũ quý, tứ quý, sảnh tiến và các biển đẹp',
+            bannerImage: '/assets/banners/car-auction-banner.jpg',
+            theme: {
+                primaryColor: '#1E40AF',   // Blue
+                secondaryColor: '#3B82F6',
+                backgroundImage: ''
+            },
+            isActive: true
+        },
+        'MotorbikePlate': {
+            roomName: 'Phòng Đấu Giá Biển Số Xe Máy',
+            roomType: 'MotorbikePlate',
+            specialization: 'Biển số xe máy đẹp',
+            location: 'Online',
+            capacity: 400,
+            description: 'Phòng chuyên đấu giá biển số xe máy ngũ quý, dễ nhớ, phong thủy tốt',
+            bannerImage: '/assets/banners/motorbike-auction-banner.jpg',
+            theme: {
+                primaryColor: '#DC2626',   // Red
+                secondaryColor: '#EF4444',
+                backgroundImage: ''
+            },
+            isActive: true
+        },
+        'Asset': {
+            roomName: 'Phòng Đấu Giá Tài Sản',
+            roomType: 'Asset',
+            specialization: 'Bất động sản và tài sản giá trị',
+            location: 'Hybrid (Online + Offline)',
+            capacity: 200,
+            description: 'Phòng đấu giá bất động sản, đất đai, tài sản giá trị cao',
+            bannerImage: '/assets/banners/asset-auction-banner.jpg',
+            theme: {
+                primaryColor: '#059669',   // Green
+                secondaryColor: '#10B981',
+                backgroundImage: ''
+            },
+            isActive: true
+        },
+        'General': {
+            roomName: 'Phòng Đấu Giá Tổng Hợp',
+            roomType: 'General',
+            specialization: 'Đa dạng sản phẩm',
+            location: 'Online',
+            capacity: 1000,
+            description: 'Phòng đấu giá tổng hợp cho tất cả các loại sản phẩm',
+            bannerImage: '',
+            theme: {
+                primaryColor: '#D4AF37',   // Gold
+                secondaryColor: '#1F2937',
+                backgroundImage: ''
+            },
+            isActive: true
+        }
+    };
+
+    const config = roomConfigs[roomType] || roomConfigs['General'];
+    const room = await Room.create(config);
+
+    console.log(`✅ Created default room: ${room.roomName}`);
+    return room;
+}
 
 export default {
     autoCreateSessionForPlate,

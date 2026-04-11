@@ -29,6 +29,7 @@ export const createRegistration = async (req, res, next) => {
         }
 
         let targetSessionId = sessionId;
+        let sessionCreated = false; // Track if we created a new session
 
         // --- AUTO-CREATE SESSION LOGIC ---
         // If sessionId is NOT provided but plateId/plateNumber IS provided
@@ -64,6 +65,7 @@ export const createRegistration = async (req, res, next) => {
             if (existingSessionPlate) {
                 console.log('✅ Found existing session for plate, using it.');
                 targetSessionId = existingSessionPlate.sessionId;
+                sessionCreated = false;
             } else {
                 console.log('🆕 Creating NEW session for plate:', plate.plateNumber);
 
@@ -77,6 +79,7 @@ export const createRegistration = async (req, res, next) => {
                 });
 
                 targetSessionId = result.session._id;
+                sessionCreated = result.isNew || true; // Mark that we created a new session
             }
         }
         // --- END AUTO-CREATE ---
@@ -152,9 +155,32 @@ export const createRegistration = async (req, res, next) => {
             notes
         });
 
+        // Populate session with room information for comprehensive response
+        const populatedRegistration = await Registration.findById(registration._id)
+            .populate({
+                path: 'sessionId',
+                populate: {
+                    path: 'roomId',
+                    select: 'roomName location capacity description'
+                }
+            });
+
+        // Get SessionPlate info for the registered session with full plate details
+        const sessionPlate = await SessionPlate.findOne({ sessionId: targetSessionId })
+            .populate({
+                path: 'plateId',
+                select: 'plateNumber images features detailedDescription priceStep startingPrice province plateType plateColor name type specifications'
+            })
+            .select('plateNumber plateId itemType startingPrice currentPrice orderNumber status priceStep');
+
         res.status(201).json({
             success: true,
-            data: registration
+            data: populatedRegistration,
+            sessionCreated: sessionCreated, // Indicate if session was newly created
+            sessionPlate: sessionPlate, // Include plate information
+            message: sessionCreated
+                ? 'Đã tạo phiên đấu giá mới và đăng ký thành công!'
+                : 'Đăng ký phiên đấu giá thành công!'
         });
 
     } catch (error) {

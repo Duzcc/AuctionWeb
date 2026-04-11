@@ -9,6 +9,9 @@
     "start": "node server.js",
     "seed": "node scripts/seeders/index.js",
     "seed:clean": "node scripts/seeders/index.js --clean",
+    "seed:professional": "node scripts/seedProfessional.js",
+    "seed:rooms": "node -e \"import('./scripts/seeders/seedProfessionalRooms.js').then(m => m.seedProfessionalRooms(true))\"",
+    "seed:plates": "node -e \"import('./scripts/seeders/seedSamplePlates.js').then(m => m.seedSamplePlatesWithImages(false))\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
