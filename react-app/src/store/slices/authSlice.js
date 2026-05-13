@@ -7,8 +7,8 @@ const initialState = {
     isAuthenticated: false,
     loading: false,
     error: null,
-    accessToken: localStorage.getItem('accessToken') || null,
-    refreshToken: localStorage.getItem('refreshToken') || null,
+    accessToken: null,
+    refreshToken: null,
 };
 
 // Async Thunks
@@ -80,9 +80,6 @@ export const verifyOTP = createAsyncThunk(
 export const logoutUser = createAsyncThunk(
     'auth/logout',
     async () => {
-        // Clear tokens from localStorage
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
         sessionStorage.clear();
         return null;
     }
@@ -100,10 +97,6 @@ const authSlice = createSlice({
             state.accessToken = accessToken;
             state.refreshToken = refreshToken;
             state.isAuthenticated = true;
-
-            // Persist tokens
-            if (accessToken) localStorage.setItem('accessToken', accessToken);
-            if (refreshToken) localStorage.setItem('refreshToken', refreshToken);
         },
         updateUser: (state, action) => {
             state.user = { ...state.user, ...action.payload };
@@ -117,8 +110,6 @@ const authSlice = createSlice({
             state.refreshToken = null;
             state.isAuthenticated = false;
             state.error = null;
-            localStorage.removeItem('accessToken');
-            localStorage.removeItem('refreshToken');
         },
     },
     extraReducers: (builder) => {
@@ -134,10 +125,6 @@ const authSlice = createSlice({
                 state.accessToken = action.payload.accessToken;
                 state.refreshToken = action.payload.refreshToken;
                 state.isAuthenticated = true;
-
-                // Persist tokens
-                localStorage.setItem('accessToken', action.payload.accessToken);
-                localStorage.setItem('refreshToken', action.payload.refreshToken);
             })
             .addCase(loginUser.rejected, (state, action) => {
                 state.loading = false;
@@ -164,7 +151,6 @@ const authSlice = createSlice({
         builder
             .addCase(refreshAccessToken.fulfilled, (state, action) => {
                 state.accessToken = action.payload.accessToken;
-                localStorage.setItem('accessToken', action.payload.accessToken);
             })
             .addCase(refreshAccessToken.rejected, (state) => {
                 // Refresh failed, logout user
@@ -172,8 +158,6 @@ const authSlice = createSlice({
                 state.accessToken = null;
                 state.refreshToken = null;
                 state.isAuthenticated = false;
-                localStorage.removeItem('accessToken');
-                localStorage.removeItem('refreshToken');
             });
 
         // Verify OTP

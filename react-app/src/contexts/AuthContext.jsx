@@ -29,6 +29,11 @@ export const AuthProvider = ({ children }) => {
             }
 
             try {
+                // =====================================================================================
+                // 🛑 🛑 [CODE GỐC BẢO MẬT] 🛑 🛑 
+                // BỎ COMMENT ĐOẠN NÀY SAU KHI DEMO XONG
+                // =====================================================================================
+                
                 // Get new access token via refresh token cookie
                 const response = await axiosPrivate.post('/auth/refresh');
                 const { accessToken, user } = response.data.data;
@@ -45,6 +50,29 @@ export const AuthProvider = ({ children }) => {
 
                 // Sync with Redux
                 dispatch(setCredentials({ user: userData, accessToken, refreshToken: null }));
+                
+
+
+                // =====================================================================================
+                // ⚠️ ⚠️ [CODE DÀNH CHO DEMO SESSION HIJACKING] ⚠️ ⚠️
+                // XOÁ HOẶC COMMENT ĐOẠN NÀY SAU KHI DEMO XONG
+                // =====================================================================================
+            //     const savedToken = localStorage.getItem('token');
+            //     if (!savedToken) throw new Error("No token found for demo bypass");
+                
+            //     setAccessToken(savedToken);
+
+            //     // Gọi trực tiếp API lấy thông tin user bằng token giả mạo (không cần cookie refreshToken)
+            //     const meRes = await axiosPrivate.get('/auth/me', {
+            //         headers: { Authorization: `Bearer ${savedToken}` }
+            //     });
+            //     const userData = meRes.data.data.user;
+                
+            //     setUser(userData);
+
+            //     // Sync with Redux
+            //     dispatch(setCredentials({ user: userData, accessToken: savedToken, refreshToken: null }));
+            //     // =====================================================================================
 
             } catch (error) {
                 // Clear authentication state if refresh fails
