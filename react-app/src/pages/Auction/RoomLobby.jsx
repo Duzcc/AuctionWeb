@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Clock, Users, Trophy, Info, ArrowRight, CheckCircle } from 'lucide-react';
+import { Clock, Users, Trophy, Info, ArrowRight, CheckCircle, AlertCircle } from 'lucide-react';
 import axios from '@/services/axiosInstance';
 import { useAuth } from '../../contexts/AuthContext';
 import './RoomLobby.css';
