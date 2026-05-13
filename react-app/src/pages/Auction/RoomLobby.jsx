@@ -21,7 +21,7 @@ export default function RoomLobby() {
     const [canJoin, setCanJoin] = useState(false);
     const [registration, setRegistration] = useState(null);
 
-    // Fetch session details
+    // Fetch session details - Updated at 2026-05-13 16:56
     useEffect(() => {
         const fetchData = async () => {
             try {
