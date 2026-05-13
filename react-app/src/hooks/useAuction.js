@@ -25,7 +25,7 @@ export function useAuction(sessionPlateId, token) {
         if (!sessionPlateId || !token) return;
 
         // Create socket connection
-        const socket = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:5050', {
+        const socket = io(import.meta.env.VITE_SOCKET_URL || 'https://auctionweb-7x2m.onrender.com', {
             auth: { token },
             reconnection: true,
             reconnectionDelay: 1000,

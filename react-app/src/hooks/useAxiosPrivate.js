@@ -25,7 +25,7 @@ const useAxiosPrivate = () => {
                     try {
                         // Call refresh endpoint
                         // Note: We use a raw axios instance here to avoid infinite loops if refresh fails
-                        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5050/api';
+                        const API_URL = import.meta.env.VITE_API_URL || 'https://auctionweb-7x2m.onrender.com/api';
                         const response = await axios.post(`${API_URL}/auth/refresh`, {}, {
                             withCredentials: true
                         });

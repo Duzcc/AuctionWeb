@@ -4,7 +4,7 @@ import { refreshAccessToken, logout } from '../store/slices/authSlice';
 
 // Create axios instance with default config
 const axiosInstance = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5050/api',
+    baseURL: import.meta.env.VITE_API_URL || 'https://auctionweb-7x2m.onrender.com/api',
     timeout: 10000,
     headers: {
         'Content-Type': 'application/json',
