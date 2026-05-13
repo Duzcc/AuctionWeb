@@ -22,6 +22,7 @@ export default function RoomLobby() {
     const [registration, setRegistration] = useState(null);
 
     // Fetch session details
+    useEffect(() => {
         const fetchData = async () => {
             try {
                 // Fetch session and my registrations parallel
