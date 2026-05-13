@@ -14,7 +14,7 @@ export const connectSocket = (token) => {
         return socket;
     }
 
-    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+    const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://auctionweb-7x2m.onrender.com';
 
     socket = io(SOCKET_URL, {
         auth: {

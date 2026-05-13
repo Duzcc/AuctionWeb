@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useAuction } from './useAuction';
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || 'https://auctionweb-7x2m.onrender.com/api';
 
 /**
  * Custom hook for bidding functionality
